@@ -6,8 +6,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || ''
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
 const GROQ_API_KEY = Deno.env.get('GROQ_API_KEY') || ''
 const CONFIGURED = Boolean(SESSION_SECRET && SUPABASE_URL && SERVICE_KEY && GROQ_API_KEY)
-
-const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
+const supabase = CONFIGURED ? createClient(SUPABASE_URL, SERVICE_KEY) : null
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -16,7 +15,7 @@ const json = (body: unknown, status = 200) =>
   })
 
 async function verifySession(token: string | null): Promise<boolean> {
-  if (!token) return false
+  if (!CONFIGURED || !token) return false
   const [payload, sig] = token.split('.')
   if (!payload || !sig) return false
   if (Number(payload) < Date.now()) return false
@@ -60,7 +59,7 @@ async function callAI(messages: { role: string; content: string }[]): Promise<st
 }
 
 Deno.serve(async (req) => {
-  if (!CONFIGURED) return json({ error: 'Server configuration incomplete' }, 503)
+  if (!CONFIGURED || !supabase) return json({ error: 'Server configuration incomplete' }, 503)
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
 
   const token = req.headers.get('x-session')
