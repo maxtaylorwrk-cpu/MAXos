@@ -1,8 +1,9 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 
-const SESSION_SECRET = Deno.env.get('SESSION_SECRET')!
-const APP_PASSPHRASE = Deno.env.get('APP_PASSPHRASE')!
+const SESSION_SECRET = Deno.env.get('SESSION_SECRET') || ''
+const APP_PASSPHRASE = Deno.env.get('APP_PASSPHRASE') || ''
 const SESSION_DAYS = 30
+const CONFIGURED = Boolean(SESSION_SECRET && APP_PASSPHRASE)
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -25,6 +26,7 @@ async function sign(payload: string): Promise<string> {
 }
 
 Deno.serve(async (req) => {
+  if (!CONFIGURED) return json({ error: 'Server configuration incomplete' }, 503)
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
 
   let body: { passphrase?: string }
