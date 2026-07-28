@@ -2,107 +2,134 @@
 
 _Last updated: 2026-07-28_
 
-This file is a lightweight handoff for the next engineering or AI session. It should answer: what exists, what changed recently, what is unresolved, and what should happen next.
+This file is the lightweight handoff for the next engineering or AI session.
 
 ## Current runtime
 
 - Backend/runtime: Supabase
 - Database: Supabase Postgres
 - Frontend: `app` Supabase Edge Function
-- Custom auth: passphrase → signed session token
+- Owner access: one owner key checked directly by `api` / `chat`
 - AI provider: Groq through a thin `callAI()` function
 - Current AI model: `llama-3.3-70b-versatile`
 
 ## Edge Functions
 
-All four functions are ACTIVE:
+All functions are ACTIVE:
 
-- `app` — V3
-- `auth` — V3
-- `api` — V4
-- `chat` — V4
+- `app` — V4
+- `auth` — V4, legacy endpoint retired from active use
+- `api` — V5
+- `chat` — V5
 
-All four intentionally use `verify_jwt = false` because V1 uses custom application authentication rather than Supabase Auth JWTs. This requirement is versioned in `supabase/config.toml`.
+`verify_jwt = false` remains intentional. V1 does not use Supabase Auth JWTs; `api` and `chat` enforce the single-owner key in application code.
+
+## Simplified owner gate
+
+The previous passphrase → auth function → signed 30-day session → `SESSION_SECRET` design was retired on 2026-07-28.
+
+Current flow:
+
+1. Max enters the owner key.
+2. The browser stores it locally on Max's device.
+3. `api` / `chat` requests send it as `x-maxos-key`.
+4. The Edge Function compares it with the server-side `APP_PASSPHRASE` secret.
+5. Invalid keys receive `401 Unauthorized`.
+
+`SESSION_SECRET` is no longer required.
+
+The `auth` Edge Function remains deployed only so stale clients receive HTTP 410 and know to reload.
 
 ## Database
 
 Tables:
+
 - `conversations`
 - `messages`
 - `journal_entries`
 - `knowledge_items`
 - `knowledge_suggestions`
 
-All five tables have RLS enabled. V1 intentionally has no anon/authenticated RLS policies; server-side Edge Functions use the service-role key.
+Security state:
 
-Permanent knowledge currently includes the Lola continuity documents plus a durable `Source of Truth & Recovery Policy` describing GitHub/Supabase/Notion responsibilities.
+- RLS enabled on all five tables.
+- No direct browser RLS policies.
+- Direct SQL privileges for `anon` and `authenticated` have been revoked; verified count = **0**.
+- Server-side Edge Functions use the service-role key after the owner-key gate.
 
-## Fixes completed on 2026-07-28
+Migration history now includes:
 
-1. **Knowledge review field mismatch fixed**
-   - Deployed API expected `proposed_content` / `resolved_at`.
-   - Actual database uses `content` / `reviewed_at`.
-   - Current API matches the real schema.
+- `20260728005556 max_os_core_schema`
+- `20260728023432 decouple_from_supabase_auth`
+- `20260728203414 lock_down_direct_table_grants`
 
-2. **Frontend inline-handler escaping removed**
-   - The prior app generated fragile over-escaped inline `onclick` handlers.
-   - App V3 uses DOM event listeners and data attributes instead.
-   - JavaScript syntax was checked before deployment.
+## Work audit response / simplification decision
 
-3. **GitHub recovery layer established**
-   - Live function sources were captured from Supabase before repairs where applicable.
-   - Corrected deployable source is now versioned.
-   - Original database migration history is versioned.
-   - `supabase/config.toml` records the custom-auth deployment requirement.
+A read-only ChatGPT Work pressure test correctly identified that the prior custom session design was oversized for a one-user V1.
 
-4. **Functions fail closed on missing configuration**
-   - `auth` requires both `APP_PASSPHRASE` and `SESSION_SECRET` before processing requests.
-   - `api` requires its session and privileged server configuration before initializing its Supabase client.
-   - `chat` requires session, privileged server configuration, and `GROQ_API_KEY` before initializing privileged code.
-   - Missing configuration produces a generic server-configuration error; secret values are never returned.
+Decision:
+
+- Do **not** remove the front-door gate entirely.
+- Do remove unnecessary session machinery.
+- Keep one owner key because public Edge Function URLs can still receive automated internet traffic even if Max OS is obscure.
+- Make the database boundary stronger instead: no direct client table grants.
+
+## Other fixes currently in GitHub / runtime
+
+- Knowledge review field mismatch fixed (`content` / `reviewed_at`).
+- Knowledge approval avoids inserting an exact duplicate permanent item on repeated approval attempts.
+- Frontend over-escaped inline handlers were replaced with normal event handling.
+- Chat selects the latest 30 messages and then restores chronological order before sending context to the model.
+- Missing critical runtime configuration fails closed.
+- Original migration history and deployed source are versioned in GitHub.
+- `skills/max-os-maintainer/SKILL.md` defines the maintenance protocol for future AI agents.
 
 ## Secrets
 
-Custom runtime secret names:
-- `GROQ_API_KEY`
-- `APP_PASSPHRASE`
-- `SESSION_SECRET`
+Custom runtime secrets actually needed by V1:
 
-Supabase-hosted defaults used server-side:
+- `APP_PASSPHRASE` — legacy name; functions as the one owner key.
+- `GROQ_API_KEY`
+
+Supabase server environment:
+
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 
-Never commit secret values.
+`SESSION_SECRET` is retired and can be removed from the project later.
 
-### Security follow-up
+Never commit or paste secret values into GitHub, Notion, or AI chat.
 
-The custom secret values were previously handled in an AI chat while setup was in progress. Treat any secret value that appeared in chat as compromised and rotate it before considering V1 secure.
+## Biggest remaining continuity risk
 
-The connector can manage Edge Function code and database state but does not expose secret-management actions, so custom secret values still require the Supabase dashboard/CLI secret flow.
+**Live Supabase data does not yet have a verified off-platform backup/restore process.**
 
-## Supabase advisor state
+GitHub can reconstruct code and schema, but conversations, messages, journal entries, and live knowledge could still be lost if the Supabase project/data were destroyed.
 
-Security advisor:
-- Only informational `RLS enabled, no policy` notices are present for the five V1 tables. This is expected under the deliberate deny-by-default + service-role server architecture.
-
-Performance advisor:
-- Two informational unindexed-foreign-key notices exist on `source_conversation_id` fields.
-- Existing indexes are currently reported unused because the application has almost no runtime data yet.
-- No performance migration was added; V1 should earn optimizations through real usage.
+This is more important for long-term Max OS durability than adding more authentication layers.
 
 ## Still unresolved
 
-- Verify all three custom Edge Function secrets are present and rotate any values previously exposed in chat.
-- End-to-end test: login → home → chat → journal → search → knowledge review.
-- Decide whether to harden the custom session design before wider use.
+- Confirm the owner key you intend to use is set as `APP_PASSPHRASE` and is unique to Max OS.
+- Confirm/rotate `GROQ_API_KEY` if its value was ever exposed in chat.
+- End-to-end test: owner key → home → Lola chat → journal → search → knowledge review.
+- Establish and test an off-platform live-data backup/restore process.
 - GitHub repository is temporarily public for setup/debugging and should be returned to private after the current integration work is complete.
 
 ## Claude resumption rule
 
-Claude's earlier session is now stale. Before it resumes any unfinished task, it must re-read this file, review the current GitHub repository, and inspect the live Supabase functions/schema. It should not redeploy older function code from its previous context.
+Claude's earlier session is stale. It must **not** continue the three-secret/session task it was doing.
+
+When Claude returns, it must first:
+
+1. Read this file.
+2. Read `skills/max-os-maintainer/SKILL.md`.
+3. Review current GitHub code.
+4. Inspect live Supabase functions/schema.
+5. Treat `SESSION_SECRET` / signed-session work as intentionally retired.
 
 ## Next engineering priority
 
-**Finish and verify V1 before adding new modules.**
+**Use and verify V1, then build backup continuity.**
 
-The next session should test the deployed application end to end and only fix failures that can be reproduced. Do not expand the architecture until the core loop works reliably.
+Do not add multi-user authentication or speculative modules unless a real use case appears.
