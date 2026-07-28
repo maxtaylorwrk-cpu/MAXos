@@ -4,61 +4,81 @@ This document describes the current V1 architecture for Max OS and the source-of
 
 ## Runtime flow
 
+```text
 User
   ↓
 Frontend / `app` Edge Function
-  ↓
-`auth` / `api` / `chat` Edge Functions
-  ↓
+  ↓ one owner key
+`api` / `chat` Edge Functions
+  ↓ server-only service role
 Supabase Postgres
   ↓
 AI provider via thin `callAI()` function
+```
+
+The legacy `auth` Edge Function is retired from the active request path. It remains deployed only to return a clear retirement response to stale clients.
 
 ## Source-of-truth boundaries
 
-Max OS intentionally has different sources of truth for different kinds of information:
-
 - **GitHub** — technical source of truth for code, database migrations, recovery instructions, and deployable configuration.
-- **Supabase** — live runtime and live application-data source of truth. It hosts Edge Functions and Postgres.
-- **Notion** — human-editable documentation, philosophy, planning, architecture explanations, and long-term context. It is not an application runtime dependency.
+- **Supabase** — live runtime and live application-data source of truth.
+- **Notion** — human-editable documentation, philosophy, planning, architecture explanations, and long-term context. It is not a runtime dependency.
 - **AI providers** — replaceable inference engines. No provider owns Max OS identity or data.
 
-This separation is deliberate. Losing or replacing one vendor should not destroy the system.
+## V1 owner model
 
-## Runtime notes
+Max OS is deliberately single-owner.
 
-- Supabase acts as both the runtime host for Edge Functions and the Postgres database.
-- The `chat` Edge Function calls a thin `callAI()` abstraction to the AI provider (currently Groq / `llama-3.3-70b-versatile`). Keep this abstraction intentionally small in V1.
-- Do not introduce an elaborate AI gateway yet. Portability matters, but unused abstractions are technical debt.
-- V1 uses a custom passphrase plus signed session token instead of Supabase Auth.
-- The Edge Functions therefore use `verify_jwt = false` and enforce the custom session rules in application code.
+V1 does **not** need multi-user account infrastructure. It therefore avoids OAuth, organizations, roles, MFA flows, Supabase Auth sessions, and custom signed application sessions.
+
+The active gate is intentionally simple:
+
+1. Max enters the owner key in the app.
+2. The browser stores it locally on Max's device for convenience.
+3. Requests to `api` and `chat` send it in the `x-maxos-key` header.
+4. Server-side functions compare it against the `APP_PASSPHRASE` Edge Function secret.
+5. A bad or missing key receives `401 Unauthorized`.
+
+`SESSION_SECRET` is retired from V1.
+
+This is not intended as a reusable SaaS authentication system. If Max OS ever becomes multi-user or internet-facing for other people, authentication should be redesigned rather than extending this V1 gate.
 
 ## Database layers
 
 ### Conversation Layer
-- `conversations` — conversation-level metadata
-- `messages` — chat messages
-- `journal_entries` — personal journal entries
+- `conversations`
+- `messages`
+- `journal_entries`
 
 ### Knowledge Review Layer
-- `knowledge_suggestions` — suggested knowledge awaiting explicit review
+- `knowledge_suggestions`
 
 ### Permanent Knowledge Layer
-- `knowledge_items` — approved durable knowledge entries
+- `knowledge_items`
 
 Promotion flow:
 
-Conversation → Suggested Knowledge → Human Review → Approval → Permanent Knowledge
+`Conversation → Suggested Knowledge → Human Review → Approval → Permanent Knowledge`
 
 Nothing should automatically become permanent knowledge without explicit approval.
 
-## Security and RLS
+## Security boundary
 
-- All five application tables have Row Level Security enabled.
-- V1 intentionally has **zero RLS policies** for anon/authenticated clients, producing deny-by-default direct database access.
-- The service-role key is used only inside server-side Edge Functions and must never be exposed to browser/client code.
-- Custom secrets belong in Supabase Edge Function secrets, never in Git.
-- The current session design is intentionally lightweight for a single-owner V1 and should receive a dedicated security review before multi-user expansion.
+The important security boundary is server-side data access, not complicated user-management machinery.
+
+- All five application tables have RLS enabled.
+- There are zero direct RLS access policies for browser roles.
+- Direct table privileges for `anon` and `authenticated` are revoked.
+- Browser code never receives `SUPABASE_SERVICE_ROLE_KEY`.
+- Server-side `api` / `chat` functions use service-role access only after the owner-key check.
+- `GROQ_API_KEY` remains server-only.
+- `verify_jwt = false` is intentional because these functions use the custom one-owner gate rather than Supabase Auth JWTs.
+
+## AI layer
+
+The `chat` Edge Function currently calls Groq through a small `callAI()` function using `llama-3.3-70b-versatile`.
+
+Keep the abstraction thin in V1. Provider portability matters, but a large provider framework is unnecessary until changing providers becomes a real need.
 
 ## Versioned recovery artifacts
 
@@ -66,9 +86,14 @@ GitHub should contain:
 
 - every deployed Edge Function source file
 - `supabase/config.toml`
-- the historical database migrations in `supabase/migrations/`
+- database migrations under `supabase/migrations/`
 - `.env.example` containing names/placeholders only
 - recovery and continuity documentation
+- `skills/max-os-maintainer/SKILL.md`
+
+## Known continuity gap
+
+GitHub preserves code and schema, but it does not preserve live Supabase application data. An off-platform backup/restore process for conversations, journals, messages, and knowledge is still required before Max OS can honestly claim long-term durability.
 
 ## Deployment principle
 
