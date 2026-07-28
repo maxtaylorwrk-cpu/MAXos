@@ -1,58 +1,93 @@
 # Max OS
 
-Max OS is a private personal operating system and lifelong personal archive for Max. It is designed to preserve identity, decisions, durable knowledge, projects, reflections, and the continuity of thought across time and changing platforms.
+Max OS is a one-user personal operating system and long-term personal archive for Max. It is designed to preserve identity, decisions, durable knowledge, projects, reflections, and continuity across changing tools and AI platforms.
 
-This repository is the technical source of truth for Max OS. It intentionally contains only code and documentation required to: preserve the current Supabase-based implementation, document architecture and philosophy, and make future recovery and development safe.
+This repository is the technical source of truth for Max OS code, migrations, recovery instructions, and deployable configuration.
 
-Principles
-- Exist. Ship. Learn. — get V1 working reliably before expanding features.
+## Principles
+
+- **Exist. Ship. Learn.** Get V1 working reliably before expanding features.
 - Preserve what exists. Do not over-engineer or prematurely optimize.
 - Technology should help Max become more, not merely do more.
+- V1 should earn complexity through real use.
 
-What Max OS is (V1)
-- A one-user personal app that runs on Supabase as the backend/runtime.
-- Lola is the AI thinking-partner layer — a collaborator, not a mere assistant.
-- Authentication is a custom passphrase/session system (not Supabase Auth).
-- The AI chat function currently uses a thin callAI() abstraction; the live model is llama-3.3-70b-versatile through Groq in V1.
+## What Max OS is today
 
-Why this repository exists
-- Establish GitHub as the canonical, recoverable source of truth for Max OS.
-- Document architecture, recovery, continuity, and the Lola relationship.
-- Preserve deployed code (by copying exact sources when available) and avoid burying secrets.
+- A single-owner personal app running on Supabase.
+- Lola is the AI thinking-partner layer.
+- The frontend is served by the `app` Supabase Edge Function.
+- `api` and `chat` are server-side Edge Functions using the Supabase service role.
+- V1 uses one owner key rather than a multi-user authentication system.
+- The owner key is sent only to the server-side API/chat gate; `SESSION_SECRET` and signed application sessions are retired.
+- The AI chat layer currently uses Groq / `llama-3.3-70b-versatile` through a deliberately thin `callAI()` function.
 
-Current V1 architecture
+## Current V1 architecture
+
+```text
 User
   ↓
-Frontend / app Edge Function
-  ↓
-auth / api / chat Edge Functions
-  ↓
+app Edge Function (public shell)
+  ↓ owner key
+api / chat Edge Functions
+  ↓ server-only service role
 Supabase Postgres
   ↓
-AI provider via thin callAI() function
+AI provider via callAI()
+```
 
-Key database tables (V1)
-- knowledge_items — permanent knowledge
-- knowledge_suggestions — suggested items for review
-- conversations — conversation metadata
-- messages — chat messages
-- journal_entries — personal journal entries
+The legacy `auth` function remains deployed only so stale clients receive a clear retirement response. New clients do not use it.
 
-Secrets and security (short)
-- Secrets MUST NEVER be committed to Git. See docs/ for fuller guidance.
-- Important secret names (examples, not values): GROQ_API_KEY, APP_PASSPHRASE, SESSION_SECRET, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+## Database boundaries
 
-Current status and focus
-- Preserve the current Supabase implementation and documentation.
-- Keep the AI abstraction thin; do not build a complex AI gateway yet.
-- V1 goal: get the system working reliably and recoverable.
+Application tables:
 
-What I did in this commit
-- Create repository skeleton, documentation, placeholders for Supabase Edge Functions, and migration README.
+- `knowledge_items`
+- `knowledge_suggestions`
+- `conversations`
+- `messages`
+- `journal_entries`
 
-Next steps
-- Copy exact deployed Edge Function sources into supabase/functions/* when available.
-- Export and commit database migration files or a SQL schema dump for Postgres.
+All five have RLS enabled. Direct table privileges for `anon` and `authenticated` are revoked. Browser clients do not access these tables directly; server-side Edge Functions use `SUPABASE_SERVICE_ROLE_KEY`.
 
-License and privacy
-- This repository is private and intended to remain so. Do not publish secrets or service keys.
+## Secrets
+
+Never commit secret values.
+
+Custom runtime secrets:
+
+- `APP_PASSPHRASE` — legacy environment name; used as the single owner key in V1.
+- `GROQ_API_KEY`
+
+Supabase server environment:
+
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+`SESSION_SECRET` is no longer used by V1.
+
+## Source-of-truth split
+
+- **GitHub** — code, migrations, configuration, recovery documentation.
+- **Supabase** — live runtime and live application data.
+- **Notion** — human-readable philosophy, architecture, decisions, and continuity.
+
+## Current priority
+
+Finish and verify the core loop before adding modules:
+
+`owner key → home → Lola chat → journal → search → knowledge review`
+
+The largest continuity gap still open is a verified off-platform backup of live Supabase data. Code and schema are recoverable from GitHub; conversations, messages, journals, and operational knowledge still need a durable backup process.
+
+## Maintenance protocol
+
+Future agents should read:
+
+- `docs/CURRENT_STATE.md`
+- `skills/max-os-maintainer/SKILL.md`
+
+before changing the system.
+
+## Privacy
+
+The repository is temporarily public during setup/debugging. It is intended to be returned to **private** after the current integration work is complete. No secret values belong in Git regardless of repository visibility.
