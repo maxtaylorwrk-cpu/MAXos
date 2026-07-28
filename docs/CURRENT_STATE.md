@@ -15,12 +15,12 @@ This file is a lightweight handoff for the next engineering or AI session. It sh
 
 ## Edge Functions
 
-All four functions are ACTIVE and currently on V3:
+All four functions are ACTIVE:
 
-- `app` — V3 frontend deployed on 2026-07-28
-- `api` — V3 deployed on 2026-07-28
-- `auth` — V3 deployed on 2026-07-28
-- `chat` — V3 deployed on 2026-07-28
+- `app` — V3
+- `auth` — V3
+- `api` — V4
+- `chat` — V4
 
 All four intentionally use `verify_jwt = false` because V1 uses custom application authentication rather than Supabase Auth JWTs. This requirement is versioned in `supabase/config.toml`.
 
@@ -42,7 +42,7 @@ Permanent knowledge currently includes the Lola continuity documents plus a dura
 1. **Knowledge review field mismatch fixed**
    - Deployed API expected `proposed_content` / `resolved_at`.
    - Actual database uses `content` / `reviewed_at`.
-   - API V3 now matches the real schema.
+   - Current API matches the real schema.
 
 2. **Frontend inline-handler escaping removed**
    - The prior app generated fragile over-escaped inline `onclick` handlers.
@@ -50,15 +50,16 @@ Permanent knowledge currently includes the Lola continuity documents plus a dura
    - JavaScript syntax was checked before deployment.
 
 3. **GitHub recovery layer established**
-   - Live `auth`, original `api`, and `chat` sources were captured from Supabase before repairs.
+   - Live function sources were captured from Supabase before repairs where applicable.
    - Corrected deployable source is now versioned.
    - Original database migration history is versioned.
    - `supabase/config.toml` records the custom-auth deployment requirement.
 
-4. **Functions now fail closed on missing custom configuration**
-   - `auth` returns a generic configuration error instead of attempting to operate without `APP_PASSPHRASE` or `SESSION_SECRET`.
-   - `chat` returns a generic configuration error instead of attempting to operate without its required server-side configuration, including `GROQ_API_KEY`.
-   - No secret values are exposed by these checks.
+4. **Functions fail closed on missing configuration**
+   - `auth` requires both `APP_PASSPHRASE` and `SESSION_SECRET` before processing requests.
+   - `api` requires its session and privileged server configuration before initializing its Supabase client.
+   - `chat` requires session, privileged server configuration, and `GROQ_API_KEY` before initializing privileged code.
+   - Missing configuration produces a generic server-configuration error; secret values are never returned.
 
 ## Secrets
 
@@ -95,6 +96,10 @@ Performance advisor:
 - End-to-end test: login → home → chat → journal → search → knowledge review.
 - Decide whether to harden the custom session design before wider use.
 - GitHub repository is temporarily public for setup/debugging and should be returned to private after the current integration work is complete.
+
+## Claude resumption rule
+
+Claude's earlier session is now stale. Before it resumes any unfinished task, it must re-read this file, review the current GitHub repository, and inspect the live Supabase functions/schema. It should not redeploy older function code from its previous context.
 
 ## Next engineering priority
 
