@@ -45,11 +45,7 @@ const HTML = String.raw`<!DOCTYPE html>
     justify-content: space-between;
     gap: 12px;
   }
-  .topbar-title {
-    font-size: 22px;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-  }
+  .topbar-title { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
   .text-button {
     border: 0;
     background: transparent;
@@ -90,7 +86,6 @@ const HTML = String.raw`<!DOCTYPE html>
     width: 100%;
   }
   .btn.secondary { background: var(--accent-soft); color: var(--accent); }
-  .btn.danger { background: var(--danger); }
   input, textarea {
     width: 100%;
     border: 1px solid var(--border);
@@ -173,24 +168,23 @@ const HTML = String.raw`<!DOCTYPE html>
     font-weight: 650;
   }
   .empty { color: var(--muted); font-size: 14px; padding: 24px 0; text-align: center; }
+  .error-box, .error-text { color: var(--danger); font-size: 13px; }
   .error-box {
-    color: var(--danger);
     background: #fff;
     border: 1px solid #f0d5d0;
     border-radius: 12px;
     padding: 12px;
-    font-size: 13px;
   }
-  .login-wrap {
+  .unlock-wrap {
     min-height: 100vh;
     display: flex;
     flex-direction: column;
     justify-content: center;
     padding: 24px;
   }
-  .login-title { font-size: 27px; font-weight: 750; margin-bottom: 6px; }
-  .login-sub { color: var(--muted); margin-bottom: 24px; font-size: 14px; }
-  .error-text { color: var(--danger); font-size: 13px; margin-top: 8px; min-height: 18px; }
+  .unlock-title { font-size: 27px; font-weight: 750; margin-bottom: 6px; }
+  .unlock-sub { color: var(--muted); margin-bottom: 24px; font-size: 14px; line-height: 1.5; }
+  .error-text { margin-top: 8px; min-height: 18px; }
   .cat-pill {
     display: inline-block;
     background: var(--accent-soft);
@@ -220,8 +214,9 @@ const HTML = String.raw`<!DOCTYPE html>
 <div id="root"></div>
 <script>
 (function () {
+  var STORAGE_KEY = 'maxos_owner_key';
   var state = {
-    token: localStorage.getItem('maxos_token') || null,
+    key: localStorage.getItem(STORAGE_KEY) || '',
     view: 'home',
     convoId: null,
     searchTimer: null
@@ -235,23 +230,19 @@ const HTML = String.raw`<!DOCTYPE html>
     });
   }
 
-  function logout() {
-    state.token = null;
+  function lock() {
+    state.key = '';
     state.convoId = null;
-    localStorage.removeItem('maxos_token');
-    renderLogin();
+    localStorage.removeItem(STORAGE_KEY);
+    renderUnlock();
   }
 
   async function parseResponse(res) {
-    var data;
-    try {
-      data = await res.json();
-    } catch (_err) {
-      data = {};
-    }
+    var data = {};
+    try { data = await res.json(); } catch (_err) {}
     if (res.status === 401) {
-      logout();
-      throw new Error('Session expired');
+      lock();
+      throw new Error('Owner key rejected');
     }
     if (!res.ok) throw new Error(data.error || 'Something went wrong');
     return data;
@@ -260,7 +251,10 @@ const HTML = String.raw`<!DOCTYPE html>
   async function api(action, params) {
     var res = await fetch('/functions/v1/api', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-session': state.token || '' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-maxos-key': state.key
+      },
       body: JSON.stringify(Object.assign({ action: action }, params || {}))
     });
     return parseResponse(res);
@@ -269,7 +263,10 @@ const HTML = String.raw`<!DOCTYPE html>
   async function sendChat(message, conversationId) {
     var res = await fetch('/functions/v1/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-session': state.token || '' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-maxos-key': state.key
+      },
       body: JSON.stringify({ message: message, conversationId: conversationId || null })
     });
     return parseResponse(res);
@@ -289,11 +286,10 @@ const HTML = String.raw`<!DOCTYPE html>
     }).join('') + '</div>';
   }
 
-  function shell(title, innerHtml, activeNav, options) {
-    var showLogout = !(options && options.hideLogout);
+  function shell(title, innerHtml, activeNav) {
     root.innerHTML =
       '<div class="topbar"><div class="topbar-title">' + escapeHtml(title) + '</div>' +
-      (showLogout ? '<button class="text-button" data-action="logout">Log out</button>' : '') + '</div>' +
+      '<button class="text-button" data-action="lock">Lock</button></div>' +
       '<div class="content">' + innerHtml + '</div>' +
       navbar(activeNav);
   }
@@ -304,46 +300,44 @@ const HTML = String.raw`<!DOCTYPE html>
     render();
   }
 
-  function renderLogin() {
+  function renderUnlock(message) {
     root.innerHTML =
-      '<div class="login-wrap">' +
-      '<div class="login-title">Max OS</div>' +
-      '<div class="login-sub">Your personal operating system.</div>' +
-      '<input id="pw" type="password" placeholder="Passphrase" autocomplete="current-password" autofocus />' +
+      '<div class="unlock-wrap">' +
+      '<div class="unlock-title">Max OS</div>' +
+      '<div class="unlock-sub">One-user mode. Enter your owner key once on this device.</div>' +
+      '<input id="ownerKey" type="password" placeholder="Owner key" autocomplete="current-password" autofocus />' +
       '<div style="height:12px"></div>' +
-      '<button id="loginBtn" class="btn">Enter</button>' +
-      '<div class="error-text" id="loginErr"></div>' +
+      '<button id="unlockBtn" class="btn">Enter</button>' +
+      '<div class="error-text" id="unlockErr">' + escapeHtml(message || '') + '</div>' +
       '</div>';
 
-    var input = document.getElementById('pw');
+    var input = document.getElementById('ownerKey');
     input.addEventListener('keydown', function (event) {
-      if (event.key === 'Enter') login();
+      if (event.key === 'Enter') unlock();
     });
-    document.getElementById('loginBtn').addEventListener('click', login);
+    document.getElementById('unlockBtn').addEventListener('click', unlock);
   }
 
-  async function login() {
-    var input = document.getElementById('pw');
-    var err = document.getElementById('loginErr');
-    var button = document.getElementById('loginBtn');
-    var passphrase = input.value;
+  async function unlock() {
+    var input = document.getElementById('ownerKey');
+    var err = document.getElementById('unlockErr');
+    var button = document.getElementById('unlockBtn');
+    var candidate = input.value.trim();
+    if (!candidate) return;
+
     err.textContent = '';
     button.disabled = true;
     button.textContent = 'Entering…';
+    state.key = candidate;
 
     try {
-      var res = await fetch('/functions/v1/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ passphrase: passphrase })
-      });
-      var data = await parseResponse(res);
-      state.token = data.token;
-      localStorage.setItem('maxos_token', data.token);
+      await api('home', {});
+      localStorage.setItem(STORAGE_KEY, candidate);
       state.view = 'home';
       await render();
     } catch (e) {
-      if (state.token) return;
+      state.key = '';
+      localStorage.removeItem(STORAGE_KEY);
       err.textContent = e.message;
       button.disabled = false;
       button.textContent = 'Enter';
@@ -351,8 +345,8 @@ const HTML = String.raw`<!DOCTYPE html>
   }
 
   async function render() {
-    if (!state.token) {
-      renderLogin();
+    if (!state.key) {
+      renderUnlock();
       return;
     }
 
@@ -366,8 +360,8 @@ const HTML = String.raw`<!DOCTYPE html>
       else if (state.view === 'search') renderSearch();
       else setView('home');
     } catch (e) {
-      if (!state.token) return;
-      shell('Max OS', '<div class="error-box">' + escapeHtml(e.message) + '</div>', state.view === 'search' ? 'search' : 'home');
+      if (!state.key) return;
+      shell('Max OS', '<div class="error-box">' + escapeHtml(e.message) + '</div>', 'home');
     }
   }
 
@@ -392,17 +386,14 @@ const HTML = String.raw`<!DOCTYPE html>
       html += '<div class="empty">Nothing here yet.</div>';
     } else {
       html += data.recentKnowledge.map(function (k) {
-        return '<div class="card">' +
-          '<div class="cat-pill">' + escapeHtml(k.category) + '</div>' +
+        return '<div class="card"><div class="cat-pill">' + escapeHtml(k.category) + '</div>' +
           '<div class="card-title">' + escapeHtml(k.title) + '</div></div>';
       }).join('');
     }
 
-    html += '<div class="section-label">More</div>' +
-      '<div class="row">' +
+    html += '<div class="section-label">More</div><div class="row">' +
       '<button class="btn secondary" data-nav="journal">Journal</button>' +
-      '<button class="btn secondary" data-nav="maxos">Knowledge</button>' +
-      '</div>';
+      '<button class="btn secondary" data-nav="maxos">Knowledge</button></div>';
 
     shell('Max OS', html, 'home');
   }
@@ -415,15 +406,14 @@ const HTML = String.raw`<!DOCTYPE html>
     }
 
     var msgHtml = messages.length ? messages.map(function (m) {
-      return '<div class="msg ' + (m.role === 'user' ? 'user' : 'assistant') + '"><div class="bubble">' + escapeHtml(m.content) + '</div></div>';
+      return '<div class="msg ' + (m.role === 'user' ? 'user' : 'assistant') +
+        '"><div class="bubble">' + escapeHtml(m.content) + '</div></div>';
     }).join('') : '<div class="empty" id="emptyChat">Say hello to Lola.</div>';
 
     shell('Lola', '<div id="msgList">' + msgHtml + '</div><div class="spacer-chat"></div>', 'chat');
     root.insertAdjacentHTML('beforeend',
-      '<div class="chat-input-bar">' +
-      '<textarea id="chatInput" placeholder="Message Lola…" rows="1"></textarea>' +
-      '<button id="sendBtn">Send</button>' +
-      '</div>'
+      '<div class="chat-input-bar"><textarea id="chatInput" placeholder="Message Lola…" rows="1"></textarea>' +
+      '<button id="sendBtn">Send</button></div>'
     );
 
     var input = document.getElementById('chatInput');
@@ -456,10 +446,12 @@ const HTML = String.raw`<!DOCTYPE html>
       var data = await sendChat(text, state.convoId);
       state.convoId = data.conversationId;
       var thinking = document.getElementById('thinking');
-      if (thinking) thinking.outerHTML = '<div class="msg assistant"><div class="bubble">' + escapeHtml(data.reply) + '</div></div>';
+      if (thinking) thinking.outerHTML =
+        '<div class="msg assistant"><div class="bubble">' + escapeHtml(data.reply) + '</div></div>';
     } catch (e) {
       var thinkingErr = document.getElementById('thinking');
-      if (thinkingErr) thinkingErr.outerHTML = '<div class="msg assistant"><div class="bubble">' + escapeHtml(e.message) + '</div></div>';
+      if (thinkingErr) thinkingErr.outerHTML =
+        '<div class="msg assistant"><div class="bubble">' + escapeHtml(e.message) + '</div></div>';
     } finally {
       button.disabled = false;
       window.scrollTo(0, document.body.scrollHeight);
@@ -486,8 +478,7 @@ const HTML = String.raw`<!DOCTYPE html>
       html += byCategory[category].map(function (item) {
         return '<div class="card interactive" data-action="toggle-detail">' +
           '<div class="card-title">' + escapeHtml(item.title) + '</div>' +
-          '<div class="detail">' + escapeHtml(item.content) + '</div>' +
-          '</div>';
+          '<div class="detail">' + escapeHtml(item.content) + '</div></div>';
       }).join('');
     });
 
@@ -503,14 +494,11 @@ const HTML = String.raw`<!DOCTYPE html>
     }
 
     var html = suggestions.map(function (s) {
-      return '<div class="card">' +
-        '<div class="cat-pill">' + escapeHtml(s.category) + '</div>' +
+      return '<div class="card"><div class="cat-pill">' + escapeHtml(s.category) + '</div>' +
         '<div class="card-title">' + escapeHtml(s.title) + '</div>' +
         '<div class="card-sub" style="white-space:pre-wrap;margin:8px 0 12px;">' + escapeHtml(s.content) + '</div>' +
-        '<div class="row">' +
-        '<button class="btn" data-review="approve" data-id="' + escapeHtml(s.id) + '">Approve</button>' +
-        '<button class="btn secondary" data-review="reject" data-id="' + escapeHtml(s.id) + '">Reject</button>' +
-        '</div></div>';
+        '<div class="row"><button class="btn" data-review="approve" data-id="' + escapeHtml(s.id) + '">Approve</button>' +
+        '<button class="btn secondary" data-review="reject" data-id="' + escapeHtml(s.id) + '">Reject</button></div></div>';
     }).join('');
 
     shell('Pending Reviews', html, 'home');
@@ -525,8 +513,7 @@ const HTML = String.raw`<!DOCTYPE html>
     var data = await api('journal.list', {});
     var entries = data.entries || [];
     var html = '<textarea id="journalInput" placeholder="What is on your mind?"></textarea>' +
-      '<div style="height:8px"></div>' +
-      '<button class="btn" id="journalSave">Save entry</button>' +
+      '<div style="height:8px"></div><button class="btn" id="journalSave">Save entry</button>' +
       '<div class="section-label">Past entries</div>';
 
     html += entries.length ? entries.map(function (entry) {
@@ -563,10 +550,7 @@ const HTML = String.raw`<!DOCTYPE html>
     var box = document.getElementById('searchResults');
     if (!input || !box) return;
     var q = input.value.trim();
-    if (!q) {
-      box.innerHTML = '';
-      return;
-    }
+    if (!q) { box.innerHTML = ''; return; }
 
     box.innerHTML = '<div class="empty">Searching…</div>';
     try {
@@ -594,7 +578,7 @@ const HTML = String.raw`<!DOCTYPE html>
     var actionTarget = event.target.closest('[data-action]');
     if (actionTarget) {
       var action = actionTarget.getAttribute('data-action');
-      if (action === 'logout') logout();
+      if (action === 'lock') lock();
       if (action === 'toggle-detail') {
         var detail = actionTarget.querySelector('.detail');
         if (detail) detail.classList.toggle('open');
