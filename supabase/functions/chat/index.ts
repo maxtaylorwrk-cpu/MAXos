@@ -1,10 +1,133 @@
-// SOURCE OF TRUTH CURRENTLY DEPLOYED IN SUPABASE.
-// Replace this placeholder only after exporting or copying the exact deployed function code.
-// Do not reconstruct from memory.
+import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
+import { createClient } from 'npm:@supabase/supabase-js@2'
 
-// Function: chat
-// Notes:
-// - Chat function currently uses a thin callAI() abstraction to the AI provider (Groq).
-// - The deployed function should be copied verbatim into this file when available.
+const SESSION_SECRET = Deno.env.get('SESSION_SECRET')!
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
+const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+const GROQ_API_KEY = Deno.env.get('GROQ_API_KEY')!
 
-export {};
+const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
+
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+async function verifySession(token: string | null): Promise<boolean> {
+  if (!token) return false
+  const [payload, sig] = token.split('.')
+  if (!payload || !sig) return false
+  if (Number(payload) < Date.now()) return false
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(SESSION_SECRET),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  )
+  const expectedBuf = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload))
+  const expected = Array.from(new Uint8Array(expectedBuf))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+  return expected === sig
+}
+
+const LOLA_PERSONA = `You are Lola. You are not a search engine, not a task manager — you are a thinking partner, pattern recognizer, system builder, and mirror that reflects the user's best self back to him. Your job is to help him become the man he is trying to become. You do this by: noticing patterns he misses, protecting his long-term goals from short-term impulses, organizing scattered thoughts into clear frameworks, asking probing follow-up questions (one good question is worth ten answers), connecting ideas across business, faith, anime, relationships, and psychology as one system, challenging limiting beliefs respectfully — never blindly agreeing, celebrating real evidence of growth, and never optimizing away rest (Man Time — anime, gaming, family — is productive recovery, not wasted time). Your communication style is warm, playful, honest, curious, and never patronizing. You treat him as a capable equal. The standard: leave every conversation with him more organized, clear, and capable than when it started.`
+
+// ---- Thin AI Gateway: the ONLY place that knows which provider is in use. ----
+// Swapping providers later means editing this one function.
+async function callAI(messages: { role: string; content: string }[]): Promise<string> {
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${GROQ_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'llama-3.3-70b-versatile',
+      messages,
+      temperature: 0.7,
+    }),
+  })
+  if (!res.ok) {
+    const errText = await res.text()
+    console.error('AI provider error:', errText)
+    throw new Error('Lola is having trouble responding right now.')
+  }
+  const data = await res.json()
+  return data.choices?.[0]?.message?.content ?? '(no response)'
+}
+// ---- end AI Gateway ----
+
+Deno.serve(async (req) => {
+  if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
+
+  const token = req.headers.get('x-session')
+  if (!(await verifySession(token))) return json({ error: 'Unauthorized' }, 401)
+
+  let body: { conversationId?: string; message?: string }
+  try {
+    body = await req.json()
+  } catch {
+    return json({ error: 'Bad request' }, 400)
+  }
+
+  const userMessage = String(body.message ?? '').trim()
+  if (!userMessage) return json({ error: 'Empty message' }, 400)
+
+  try {
+    let conversationId = body.conversationId
+
+    if (!conversationId) {
+      const { data: convo, error } = await supabase
+        .from('conversations')
+        .insert({ title: userMessage.slice(0, 60) })
+        .select()
+        .single()
+      if (error) throw error
+      conversationId = convo.id
+    } else {
+      await supabase
+        .from('conversations')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', conversationId)
+    }
+
+    await supabase
+      .from('messages')
+      .insert({ conversation_id: conversationId, role: 'user', content: userMessage })
+
+    const [{ data: knowledgeItems }, { data: history }] = await Promise.all([
+      supabase.from('knowledge_items').select('category,title,content'),
+      supabase
+        .from('messages')
+        .select('role,content')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true })
+        .limit(30),
+    ])
+
+    const knowledgeBlock = (knowledgeItems ?? [])
+      .map((k) => `[${k.category}] ${k.title}\n${k.content}`)
+      .join('\n\n---\n\n')
+
+    const systemPrompt = `${LOLA_PERSONA}\n\nHere is what you permanently know about Max (his approved knowledge base):\n\n${knowledgeBlock}`
+
+    const aiMessages = [
+      { role: 'system', content: systemPrompt },
+      ...(history ?? []).map((m) => ({ role: m.role, content: m.content })),
+    ]
+
+    const reply = await callAI(aiMessages)
+
+    await supabase
+      .from('messages')
+      .insert({ conversation_id: conversationId, role: 'assistant', content: reply })
+
+    return json({ conversationId, reply })
+  } catch (err) {
+    console.error(err)
+    return json({ error: (err as Error).message ?? 'Server error' }, 500)
+  }
+})
