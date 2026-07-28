@@ -1,0 +1,15 @@
+# Max OS V1 uses custom passphrase/session authentication rather than Supabase Auth JWTs.
+# Keep platform JWT verification disabled for these functions so requests reach the
+# custom authentication checks implemented inside the function code.
+
+[functions.app]
+verify_jwt = false
+
+[functions.auth]
+verify_jwt = false
+
+[functions.api]
+verify_jwt = false
+
+[functions.chat]
+verify_jwt = false
