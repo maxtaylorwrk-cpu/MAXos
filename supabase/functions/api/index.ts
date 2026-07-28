@@ -18,6 +18,7 @@ async function verifySession(token: string | null): Promise<boolean> {
   const [payload, sig] = token.split('.')
   if (!payload || !sig) return false
   if (Number(payload) < Date.now()) return false
+
   const key = await crypto.subtle.importKey(
     'raw',
     new TextEncoder().encode(SESSION_SECRET),
@@ -44,6 +45,7 @@ Deno.serve(async (req) => {
   } catch {
     return json({ error: 'Bad request' }, 400)
   }
+
   const action = body.action as string
 
   try {
@@ -67,6 +69,7 @@ Deno.serve(async (req) => {
               .order('updated_at', { ascending: false })
               .limit(1),
           ])
+
         return json({
           recentKnowledge: recentKnowledge ?? [],
           pendingCount: pendingCount ?? 0,
@@ -81,7 +84,7 @@ Deno.serve(async (req) => {
           .order('category')
           .order('title')
         if (error) throw error
-        return json({ items: data })
+        return json({ items: data ?? [] })
       }
 
       case 'journal.list': {
@@ -91,7 +94,7 @@ Deno.serve(async (req) => {
           .order('created_at', { ascending: false })
           .limit(100)
         if (error) throw error
-        return json({ entries: data })
+        return json({ entries: data ?? [] })
       }
 
       case 'journal.create': {
@@ -109,11 +112,11 @@ Deno.serve(async (req) => {
       case 'suggestions.list': {
         const { data, error } = await supabase
           .from('knowledge_suggestions')
-          .select('id,category,title,proposed_content,status,created_at,source_conversation_id')
+          .select('id,category,title,content,status,created_at,source_conversation_id')
           .eq('status', 'pending')
           .order('created_at', { ascending: false })
         if (error) throw error
-        return json({ suggestions: data })
+        return json({ suggestions: data ?? [] })
       }
 
       case 'suggestions.create': {
@@ -124,12 +127,13 @@ Deno.serve(async (req) => {
           source_conversation_id?: string
         }
         if (!category || !title || !content) return json({ error: 'Missing fields' }, 400)
+
         const { data, error } = await supabase
           .from('knowledge_suggestions')
           .insert({
             category,
             title,
-            proposed_content: content,
+            content,
             source_conversation_id: source_conversation_id ?? null,
           })
           .select()
@@ -150,13 +154,14 @@ Deno.serve(async (req) => {
         const { error: insertErr } = await supabase.from('knowledge_items').insert({
           category: suggestion.category,
           title: suggestion.title,
-          content: suggestion.proposed_content,
+          content: suggestion.content,
+          source_conversation_id: suggestion.source_conversation_id,
         })
         if (insertErr) throw insertErr
 
         const { error: updateErr } = await supabase
           .from('knowledge_suggestions')
-          .update({ status: 'approved', resolved_at: new Date().toISOString() })
+          .update({ status: 'approved', reviewed_at: new Date().toISOString() })
           .eq('id', id)
         if (updateErr) throw updateErr
 
@@ -167,7 +172,7 @@ Deno.serve(async (req) => {
         const id = body.id as string
         const { error } = await supabase
           .from('knowledge_suggestions')
-          .update({ status: 'rejected', resolved_at: new Date().toISOString() })
+          .update({ status: 'rejected', reviewed_at: new Date().toISOString() })
           .eq('id', id)
         if (error) throw error
         return json({ ok: true })
@@ -181,7 +186,7 @@ Deno.serve(async (req) => {
           .order('updated_at', { ascending: false })
           .limit(50)
         if (error) throw error
-        return json({ conversations: data })
+        return json({ conversations: data ?? [] })
       }
 
       case 'conversation.messages': {
@@ -192,7 +197,7 @@ Deno.serve(async (req) => {
           .eq('conversation_id', id)
           .order('created_at', { ascending: true })
         if (error) throw error
-        return json({ messages: data })
+        return json({ messages: data ?? [] })
       }
 
       case 'search': {
@@ -239,6 +244,7 @@ Deno.serve(async (req) => {
             refId: m.conversation_id,
           })),
         ]
+
         return json({ results })
       }
 
