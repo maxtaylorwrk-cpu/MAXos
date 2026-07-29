@@ -6,13 +6,12 @@ set -euo pipefail
 
 PROG="maxos-verify"
 
-usage(){
-  cat <<EOF
-Usage: $PROG /path/to/maxos-YYYYmmddTHHMMSSZ.tar.gz[.gpg] or /path/to/backupdir
-
-If the archive is encrypted (.gpg), you will be prompted for the GPG passphrase to decrypt temporarily.
-
-EOF
+usage() {
+  printf '%s\n' \
+    "Usage: $PROG /path/to/maxos-YYYYmmddTHHMMSSZ.tar.gz[.gpg] or /path/to/backupdir" \
+    "" \
+    "If the archive is encrypted (.gpg), you will be prompted for the GPG passphrase to decrypt temporarily." \
+    ""
 }
 
 if [[ ${1-} == "" ]]; then
