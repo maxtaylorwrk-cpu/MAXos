@@ -8,6 +8,7 @@ set -euo pipefail
 # Usage: ./maxos-backup.sh --outdir /path/to/out [--encrypt]
 
 PROG_NAME="maxos-backup"
+TOOL_VERSION="maxos-backup.sh v1"
 
 print_usage() {
   cat <<EOF
@@ -110,6 +111,21 @@ if [[ -z "${BACKUP_DB_URL-}" ]]; then
   exit 2
 fi
 
+# Try to capture repo metadata for manifest (best-effort)
+GIT_REPO=""
+GIT_COMMIT=""
+if command -v git >/dev/null 2>&1; then
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    GIT_REPO=$(git config --get remote.origin.url || true)
+    GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || true)
+  fi
+fi
+# Normalize repo identifier if present
+if [[ -n "$GIT_REPO" ]]; then
+  # strip .git suffix and convert to owner/repo form when possible
+  GIT_REPO=$(echo "$GIT_REPO" | sed -E 's/\.git$//' | sed -E 's#.*[:/](.+/.+)$#\1#')
+fi
+
 # Run pg_dump
 echo "Creating Postgres custom-format dump..."
 pg_dump -Fc --no-owner --no-acl -f "$DUMP_FILE" "$BACKUP_DB_URL"
@@ -130,11 +146,14 @@ for t in "${TABLES[@]}"; do
   COUNTS[$t]=$cnt
 done
 
-# Create manifest.json
+# Create manifest.json (include metadata for traceability)
 cat > "$MANIFEST_JSON" <<EOF
 {
   "backup_name": "$BACKUP_NAME",
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "maxos_repo": "${GIT_REPO}",
+  "maxos_commit": "${GIT_COMMIT}",
+  "tool_version": "${TOOL_VERSION}",
   "tables": {
 $(for t in "${TABLES[@]}"; do echo "    \"$t\": ${COUNTS[$t]},"; done)
   },
@@ -160,7 +179,7 @@ while read -r line; do
   checksum=$(echo "$line" | awk '{print $1}')
   file=$(echo "$line" | awk '{print $2}')
   size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file")
-  FILES_JSON+="    {\"path\": \"$file\", \"size\": $size, \"sha256\": \"$checksum\"},\n"
+  FILES_JSON+="    {\"path\": \"$file\", \"size\": $size, \"sha256\": \"$checksum\"},\\n"
 done < "$MANIFEST_SHA"
 # remove trailing comma
 FILES_JSON=$(echo -e "$FILES_JSON" | sed '$s/,$//')
