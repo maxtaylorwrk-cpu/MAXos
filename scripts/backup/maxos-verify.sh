@@ -110,5 +110,8 @@ fi
 
 echo "Integrity verification passed"
 
+# Ensure script ends cleanly
+: # noop
+
 echo "Verification complete: backup appears consistent and readable."
 exit 0
