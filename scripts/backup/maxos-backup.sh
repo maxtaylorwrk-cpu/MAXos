@@ -11,21 +11,21 @@ PROG_NAME="maxos-backup"
 TOOL_VERSION="maxos-backup.sh v1"
 
 print_usage() {
-  cat <<EOF
-Usage: $PROG_NAME --outdir /path/to/out [--encrypt]
-
-Options:
-  --outdir DIR      Directory where backups and manifest will be written (required)
-  --encrypt         Encrypt the final archive using GPG symmetric AES256 (interactive passphrase)
-  --dry-run         Show what would be done without contacting the database
-  --help            Show this help
-
-Environment (set locally, not in Git):
-  BACKUP_DB_URL     Postgres connection URL for the database to back up (required unless --dry-run)
-
-Example:
-  BACKUP_DB_URL=postgres://user:pass@host:5432/postgres ./scripts/backup/maxos-backup.sh --outdir "$HOME/maxos-backups" --encrypt
-EOF
+  printf '%s\n' \
+    "Usage: $PROG_NAME --outdir /path/to/out [--encrypt]" \
+    "" \
+    "Options:" \
+    "  --outdir DIR      Directory where backups and manifest will be written (required)" \
+    "  --encrypt         Encrypt the final archive using GPG symmetric AES256 (interactive passphrase)" \
+    "  --dry-run         Show what would be done without contacting the database" \
+    "  --help            Show this help" \
+    "" \
+    "Environment (set locally, not in Git):" \
+    "  BACKUP_DB_URL     Postgres connection URL for the database to back up (required unless --dry-run)" \
+    "" \
+    "Example:" \
+    "  BACKUP_DB_URL=postgres://user:pass@host:5432/postgres ./scripts/backup/maxos-backup.sh --outdir \"$HOME/maxos-backups\" --encrypt" \
+    ""
 }
 
 # Basic arg parsing
