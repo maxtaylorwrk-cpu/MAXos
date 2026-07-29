@@ -1,102 +1,55 @@
-# RECOVERY
+# RECOVERY.md
 
-This document describes how to rebuild Max OS if Supabase, GitHub, the AI provider, or the frontend deployment changes or is lost.
+# Max OS Backup & Recovery (Beginner-friendly)
 
-## 1. Restore source
+This document describes how to create, verify, and test-restore backups for Max OS.
+Follow these steps locally — do NOT commit any secrets or credentials.
 
-- Clone/download this GitHub repository.
-- Read `docs/CURRENT_STATE.md` before deploying anything.
-- Read `skills/max-os-maintainer/SKILL.md` so stale AI context does not overwrite newer state.
+1) Prerequisites (local machine)
+   - Install required CLI tools: psql, pg_dump, pg_restore (Postgres client), gpg, tar, jq, docker (for test restores).
+   - Run the doctor:
+     ./scripts/maxos-backup-cli.sh doctor
 
-## 2. Create/connect Supabase
+2) Dry run (no DB access)
+   ./scripts/backup/maxos-backup.sh --outdir /tmp/maxos-backups --dry-run
 
-- Create a Supabase project or choose a recovery project.
-- Confirm the project exposes the normal server environment values used by Edge Functions.
+3) Create a real backup (owner only)
+   - Export your DB URL locally (do NOT commit):
+     export BACKUP_DB_URL='postgres://user:password@host:5432/postgres'
+   - Create an encrypted backup and write to an outdir:
+     ./scripts/maxos-backup-cli.sh create --outdir "$HOME/maxos-backups" --encrypt
+   - The script will produce:
+     - A timestamped backup directory: $OUTDIR/maxos-<TS>/
+     - manifest.json (contains metadata and file list)
+     - manifest.sha256 (plaintext checksums)
+     - A compressed archive: maxos-<TS>.tar.gz (or .tar.gz.gpg when encrypted)
 
-## 3. Apply migrations
+4) Verify the backup (local)
+   ./scripts/maxos-backup-cli.sh verify /path/to/maxos-<TS>.tar.gz[.gpg]
 
-Apply the committed SQL migrations under `supabase/migrations/` in version order.
+5) Test restore (isolated)
+   - By default, test restore uses Docker to start an isolated Postgres and restores INTO IT.
+     ./scripts/maxos-backup-cli.sh restore-test /path/to/maxos-<TS>.tar.gz[.gpg]
+   - To target an existing local Postgres (for testing only):
+     ./scripts/restore/maxos-restore-test.sh /path/to/archive --no-docker --target-postgres "postgres://user:pass@host:5432/postgres"
+   - The restore scripts refuse production-like targets by default. Use scripts/restore/confirm-production.sh to explicitly confirm if you need to restore into production (not recommended unless you know what you're doing).
 
-The current production migration history is documented in `docs/CURRENT_STATE.md`.
+6) Where to store backups
+   - Upload encrypted archives to an off-platform, secure storage (S3 with server-side encryption, Backblaze B2, an encrypted external drive, or similar).
+   - Always keep at least two independent copies (different providers or provider + offline physical copy).
 
-After migration:
+7) Encryption & passphrase
+   - Encryption uses GPG symmetric AES256. You will be prompted for a passphrase when encrypting.
+   - Store the passphrase in a password manager and keep a secure offline physical copy. Losing the passphrase makes backups unrecoverable.
 
-- verify the five application tables exist;
-- verify RLS is enabled;
-- verify direct `anon` / `authenticated` table grants are absent.
+Owner live-verification checklist (run locally, do not commit credentials)
+  - Run doctor and ensure tools are available
+  - Create an encrypted backup with the real BACKUP_DB_URL
+  - Run verify on the produced archive
+  - Run restore-test locally and confirm row counts and sample Unicode/multiline content
+  - Upload encrypted archive to your chosen off-platform storage and confirm upload success
 
-## 4. Configure runtime secrets
+Notes
+  - The manifest.json includes metadata fields: maxos_repo, maxos_commit (best-effort), tool_version, table row counts, and file entries with size + sha256.
+  - manifest.sha256 is a plaintext checksum file for quick verification.
 
-Custom secrets needed by simplified V1:
-
-- `APP_PASSPHRASE` — the one-user owner key (legacy environment name).
-- `GROQ_API_KEY`
-
-Supabase server environment used by Edge Functions:
-
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-
-`SESSION_SECRET` is retired and is not required by current V1.
-
-Never place secret values in GitHub, Notion, tickets, or AI chat.
-
-## 5. Deploy Edge Functions
-
-Deploy from the exact committed source under:
-
-- `supabase/functions/app/index.ts`
-- `supabase/functions/api/index.ts`
-- `supabase/functions/chat/index.ts`
-- `supabase/functions/auth/index.ts` (legacy retirement response only)
-
-Current functions use `verify_jwt = false` intentionally because the application uses its own single-owner key rather than Supabase Auth JWTs.
-
-Do not blindly change this during recovery.
-
-## 6. Verify the owner boundary
-
-Expected behavior:
-
-- App shell is publicly reachable.
-- `api` and `chat` reject a missing/wrong `x-maxos-key` with `401`.
-- Correct owner key allows application requests.
-- Browser never receives the service-role key or Groq key.
-- Legacy `auth` endpoint returns a retirement response and is not used by current frontend code.
-
-## 7. End-to-end test
-
-Test in this order:
-
-1. Enter owner key.
-2. Home loads.
-3. Lola chat returns a response and persists both messages.
-4. Journal can create and reload an entry.
-5. Search returns expected records.
-6. Knowledge review can list and approve/reject a suggestion.
-7. Reload the app and confirm the stored owner key still unlocks the same device.
-8. Use **Lock** and confirm the local owner key is removed.
-
-## 8. Data restore
-
-Code/schema recovery is not the same as data recovery.
-
-A real long-term recovery process must restore:
-
-- conversations
-- messages
-- journal entries
-- knowledge items
-- knowledge suggestions
-
-At the time of this document's update, an off-platform live-data backup process is still an open requirement. Do not claim full disaster recovery until a backup has been created and a restore drill has succeeded.
-
-## 9. Notion continuity
-
-Notion is not a runtime dependency, but it contains human-readable Max OS context and should also have an independent export/backup strategy over time.
-
-## Recovery success standard
-
-Recovery is complete only when a fresh environment can reproduce the working owner-key → database → Lola loop and restore the expected historical data.
-
-A checklist without a demonstrated restore is not proof of recoverability.
