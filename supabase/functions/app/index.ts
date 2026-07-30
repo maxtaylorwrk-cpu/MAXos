@@ -734,7 +734,8 @@ const HTML = String.raw`<!DOCTYPE html>
 </body>
 </html>`
 
-const APP_PATH = '/functions/v1/app'
+const PUBLIC_APP_PATH = '/functions/v1/app'
+const INTERNAL_APP_PATH = '/app'
 const MANIFEST = "{\n  \"id\": \"/functions/v1/app/\",\n  \"name\": \"MAXos\",\n  \"short_name\": \"MAXos\",\n  \"description\": \"Private owner interface for MAXos\",\n  \"start_url\": \"/functions/v1/app/\",\n  \"scope\": \"/functions/v1/app/\",\n  \"display\": \"standalone\",\n  \"orientation\": \"any\",\n  \"background_color\": \"#F7F7F5\",\n  \"theme_color\": \"#5B7FA6\",\n  \"icons\": [\n    {\n      \"src\": \"/functions/v1/app/icon-192.png\",\n      \"sizes\": \"192x192\",\n      \"type\": \"image/png\",\n      \"purpose\": \"any\"\n    },\n    {\n      \"src\": \"/functions/v1/app/icon-512.png\",\n      \"sizes\": \"512x512\",\n      \"type\": \"image/png\",\n      \"purpose\": \"any maskable\"\n    }\n  ]\n}"
 const SERVICE_WORKER = "const APP_SCOPE = '/functions/v1/app/';\nconst STATIC_CACHE = 'maxos-static-v1';\nconst STATIC_ASSETS = [\n  APP_SCOPE + 'manifest.webmanifest',\n  APP_SCOPE + 'icon-192.png',\n  APP_SCOPE + 'icon-512.png',\n  APP_SCOPE + 'apple-touch-icon.png'\n];\nconst OFFLINE_HTML = '<!doctype html><html lang=\"en\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"theme-color\" content=\"#5B7FA6\"><title>MAXos offline</title><body style=\"margin:0;background:#F7F7F5;color:#2B2E33;font:16px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif\"><main style=\"max-width:32rem;margin:auto;padding:15vh 24px\"><h1>MAXos is offline</h1><p>Reconnect to the internet, then reopen MAXos. Chat and saved data remain on the live Supabase backend.</p></main></body></html>';\n\nself.addEventListener('install', function (event) {\n  event.waitUntil(caches.open(STATIC_CACHE).then(function (cache) {\n    return cache.addAll(STATIC_ASSETS);\n  }).then(function () { return self.skipWaiting(); }));\n});\n\nself.addEventListener('activate', function (event) {\n  event.waitUntil(caches.keys().then(function (keys) {\n    return Promise.all(keys.filter(function (key) {\n      return key.indexOf('maxos-static-') === 0 && key !== STATIC_CACHE;\n    }).map(function (key) { return caches.delete(key); }));\n  }).then(function () { return self.clients.claim(); }));\n});\n\nself.addEventListener('fetch', function (event) {\n  if (event.request.method !== 'GET') return;\n  var url = new URL(event.request.url);\n  if (url.origin !== self.location.origin || url.pathname.indexOf(APP_SCOPE) !== 0) return;\n\n  if (event.request.mode === 'navigate') {\n    event.respondWith(fetch(event.request).catch(function () {\n      return new Response(OFFLINE_HTML, {\n        status: 503,\n        headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }\n      });\n    }));\n    return;\n  }\n\n  if (STATIC_ASSETS.indexOf(url.pathname) !== -1) {\n    event.respondWith(caches.match(event.request).then(function (cached) {\n      return cached || fetch(event.request);\n    }));\n  }\n});\n"
 const ICON_192 = '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'
@@ -753,8 +754,15 @@ const SECURITY_HEADERS = {
   'Cross-Origin-Resource-Policy': 'same-origin'
 }
 
-function response(body: BodyInit, contentType: string, cacheControl: string, extraHeaders: Record<string, string> = {}) {
+function response(
+  body: BodyInit,
+  contentType: string,
+  cacheControl: string,
+  extraHeaders: Record<string, string> = {},
+  status = 200
+) {
   return new Response(body, {
+    status,
     headers: {
       ...SECURITY_HEADERS,
       'Content-Type': contentType,
@@ -764,28 +772,36 @@ function response(body: BodyInit, contentType: string, cacheControl: string, ext
   })
 }
 
-Deno.serve((request) => {
-  const path = new URL(request.url).pathname
+function appRoute(path: string) {
+  for (const base of [PUBLIC_APP_PATH, INTERNAL_APP_PATH]) {
+    if (path === base || path === base + '/') return '/'
+    if (path.startsWith(base + '/')) return path.slice(base.length)
+  }
+  return null
+}
 
-  if (path === APP_PATH + '/manifest.webmanifest') {
+Deno.serve((request) => {
+  const route = appRoute(new URL(request.url).pathname)
+
+  if (route === '/manifest.webmanifest') {
     return response(MANIFEST, 'application/manifest+json; charset=utf-8', 'public, max-age=3600')
   }
-  if (path === APP_PATH + '/sw.js') {
+  if (route === '/sw.js') {
     return response(SERVICE_WORKER, 'application/javascript; charset=utf-8', 'no-store', {
-      'Service-Worker-Allowed': APP_PATH + '/'
+      'Service-Worker-Allowed': PUBLIC_APP_PATH + '/'
     })
   }
-  if (path === APP_PATH + '/icon-192.png') {
+  if (route === '/icon-192.png') {
     return response(base64Bytes(ICON_192), 'image/png', 'public, max-age=31536000, immutable')
   }
-  if (path === APP_PATH + '/icon-512.png') {
+  if (route === '/icon-512.png') {
     return response(base64Bytes(ICON_512), 'image/png', 'public, max-age=31536000, immutable')
   }
-  if (path === APP_PATH + '/apple-touch-icon.png') {
+  if (route === '/apple-touch-icon.png') {
     return response(base64Bytes(APPLE_TOUCH_ICON), 'image/png', 'public, max-age=31536000, immutable')
   }
-  if (path !== APP_PATH && path !== APP_PATH + '/') {
-    return response('Not found', 'text/plain; charset=utf-8', 'no-store')
+  if (route !== '/') {
+    return response('Not found', 'text/plain; charset=utf-8', 'no-store', {}, 404)
   }
 
   return response(HTML, 'text/html; charset=utf-8', 'no-store')
