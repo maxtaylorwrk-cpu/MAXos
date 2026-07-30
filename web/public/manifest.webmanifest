@@ -1,0 +1,26 @@
+{
+  "id": "/",
+  "name": "MAXos",
+  "short_name": "MAXos",
+  "description": "Private owner interface for MAXos",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F7F7F5",
+  "theme_color": "#5B7FA6",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
