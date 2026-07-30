@@ -12,10 +12,10 @@ usage(){
   cat <<EOF
 Usage: $PROG /path/to/backup.tar.gz[.gpg] [--no-docker] [--target-postgres POSTGRES_URL]
 
-By default this script will create a disposable local Postgres via Docker and restore the backup into it for verification.
-Use --no-docker and --target-postgres to restore into an existing local Postgres (recommended only for testing).
+By default this script creates a disposable local Postgres via Docker and restores the backup into it for verification.
+Use --no-docker with --target-postgres only for an existing Postgres on localhost/127.0.0.1.
 
-This script will NOT target production unless you explicitly confirm using scripts/restore/confirm-production.sh.
+This test tool intentionally refuses remote/production targets. Production restore is not implemented by this command.
 EOF
 }
 
@@ -43,11 +43,10 @@ if [[ ! -f "$BACKUP_ARCHIVE" ]]; then
   exit 2
 fi
 
-# Prevent accidental production target
+# Existing targets are deliberately restricted to loopback hosts.
 if [[ -n "$TARGET_POSTGRES" ]]; then
-  # naive check for supabase-like host patterns
-  if echo "$TARGET_POSTGRES" | grep -Ei "supabase.co|:5432" >/dev/null 2>&1; then
-    echo "The target Postgres URL looks like production. To proceed, run: scripts/restore/confirm-production.sh" >&2
+  if ! printf '%s\n' "$TARGET_POSTGRES" | grep -Eq '^postgres(ql)?://[^@]*@(localhost|127\.0\.0\.1)(:|/)'; then
+    echo "ERROR: restore-test only accepts localhost/127.0.0.1 targets. Remote and production restores are intentionally unsupported." >&2
     exit 2
   fi
 fi
@@ -66,22 +65,43 @@ else
   exit 2
 fi
 
-# Create temporary workspace
+# Create temporary workspace and ensure all disposable resources are removed on every exit path.
 WORKDIR=$(mktemp -d)
-trap 'rm -rf "$WORKDIR"' EXIT
+DOCKER_CONTAINER_NAME=""
+cleanup() {
+  if [[ -n "$DOCKER_CONTAINER_NAME" ]]; then
+    docker rm -f "$DOCKER_CONTAINER_NAME" >/dev/null 2>&1 || true
+  fi
+  rm -rf "$WORKDIR"
+}
+trap cleanup EXIT
+
+safe_extract_tar() {
+  local archive="$1"
+  local destination="$2"
+  if tar -tzf "$archive" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+    echo "ERROR: archive contains unsafe absolute or parent-directory paths" >&2
+    exit 2
+  fi
+  tar -C "$destination" -xzf "$archive"
+}
 
 # If encrypted, decrypt
 TMP_ARCHIVE="$WORKDIR/archive.tar.gz"
 if [[ "$BACKUP_ARCHIVE" == *.gpg ]]; then
   echo "Decrypting backup archive to temporary location..."
-  gpg --batch --yes --output "$TMP_ARCHIVE" --decrypt "$BACKUP_ARCHIVE" || { echo "ERROR: GPG decryption failed" >&2; exit 2; }
+  if [[ -n "${BACKUP_ENCRYPTION_PASSPHRASE-}" ]]; then
+    printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --output "$TMP_ARCHIVE" --decrypt "$BACKUP_ARCHIVE" || { echo "ERROR: GPG decryption failed" >&2; exit 2; }
+  else
+    gpg --yes --output "$TMP_ARCHIVE" --decrypt "$BACKUP_ARCHIVE" || { echo "ERROR: GPG decryption failed" >&2; exit 2; }
+  fi
 else
   cp "$BACKUP_ARCHIVE" "$TMP_ARCHIVE"
 fi
 
 # Extract
-tar -C "$WORKDIR" -xzf "$TMP_ARCHIVE"
-BACKUP_DIR=$(find "$WORKDIR" -mindepth 1 -maxdepth 1 -type d | head -n1)
+safe_extract_tar "$TMP_ARCHIVE" "$WORKDIR"
+BACKUP_DIR=$(find "$WORKDIR" -mindepth 1 -maxdepth 1 -type d -print -quit)
 if [[ -z "$BACKUP_DIR" ]]; then
   echo "ERROR: could not locate extracted backup directory" >&2
   exit 2
@@ -92,6 +112,11 @@ if [[ ! -f "$BACKUP_DIR/manifest.sha256" ]]; then
   echo "ERROR: manifest.sha256 missing in backup" >&2
   exit 2
 fi
+if [[ ! -f "$BACKUP_DIR/manifest.json" ]]; then
+  echo "ERROR: manifest.json missing in backup" >&2
+  exit 2
+fi
+jq empty "$BACKUP_DIR/manifest.json" || { echo "ERROR: manifest.json is not valid JSON" >&2; exit 2; }
 
 pushd "$BACKUP_DIR" >/dev/null
 if command -v sha256sum >/dev/null 2>&1; then
@@ -102,7 +127,7 @@ fi
 popd >/dev/null
 
 # Locate dump
-DUMP_FILE=$(find "$BACKUP_DIR" -type f -name "*.dump" | head -n1)
+DUMP_FILE=$(find "$BACKUP_DIR" -type f -name "*.dump" -print -quit)
 if [[ -z "$DUMP_FILE" ]]; then
   echo "ERROR: No .dump file found in backup" >&2
   exit 2
@@ -110,21 +135,24 @@ fi
 
 # Start isolated Postgres via Docker if requested
 RESTORE_DB_URL=""
-DOCKER_CONTAINER_NAME="maxos_restore_test_$(date -u +%Y%m%dT%H%M%SZ)"
 if [[ "$USE_DOCKER" == "true" ]]; then
   if ! command -v docker >/dev/null 2>&1; then
-    echo "ERROR: Docker not available. Install Docker or use --no-docker with --target-postgres." >&2
+    echo "ERROR: Docker not available. Install Docker or use --no-docker with a local --target-postgres." >&2
     exit 2
   fi
+  DOCKER_CONTAINER_NAME="maxos_restore_test_$(date -u +%Y%m%dT%H%M%SZ)_$$"
   echo "Starting temporary Postgres Docker container: $DOCKER_CONTAINER_NAME"
   docker run --rm --name "$DOCKER_CONTAINER_NAME" -e POSTGRES_PASSWORD=postgres -e POSTGRES_USER=postgres -e POSTGRES_DB=postgres -p 5433:5432 -d postgres:15
-  # Wait for Postgres to accept connections
   for i in {1..30}; do
     if pg_isready -h localhost -p 5433 -U postgres >/dev/null 2>&1; then
       break
     fi
     sleep 1
   done
+  if ! pg_isready -h localhost -p 5433 -U postgres >/dev/null 2>&1; then
+    echo "ERROR: temporary Postgres did not become ready" >&2
+    exit 2
+  fi
   RESTORE_DB_URL="postgres://postgres:postgres@localhost:5433/postgres"
 else
   if [[ -n "$TARGET_POSTGRES" ]]; then
@@ -135,15 +163,15 @@ else
   fi
 fi
 
-# Final safety check: refuse to run if RESTORE_DB_URL looks like production (host contains supabase.co)
-if echo "$RESTORE_DB_URL" | grep -Ei "supabase.co" >/dev/null 2>&1; then
-  echo "Refusing to restore into production-like target. Use scripts/restore/confirm-production.sh to proceed intentionally." >&2
+# Defense in depth: never allow a non-loopback target through this test command.
+if ! printf '%s\n' "$RESTORE_DB_URL" | grep -Eq '^postgres(ql)?://[^@]*@(localhost|127\.0\.0\.1)(:|/)'; then
+  echo "ERROR: refusing non-local restore target. Production restore is intentionally unsupported by restore-test." >&2
   exit 2
 fi
 
 # Restore using pg_restore
-echo "Restoring dump into $RESTORE_DB_URL"
-PGPASSWORD="postgres" pg_restore --no-owner --no-acl -d "$RESTORE_DB_URL" "$DUMP_FILE" || { echo "ERROR: pg_restore failed" >&2; exit 2; }
+echo "Restoring dump into local test database"
+pg_restore --no-owner --no-acl -d "$RESTORE_DB_URL" "$DUMP_FILE" || { echo "ERROR: pg_restore failed" >&2; exit 2; }
 
 # Post-restore verification: run counts and sample queries
 echo "Running post-restore verification queries..."
@@ -159,13 +187,9 @@ psql "$RESTORE_DB_URL" -c "SELECT id, content FROM messages ORDER BY created_at 
 psql "$RESTORE_DB_URL" -c "SELECT id, content FROM journal_entries ORDER BY created_at LIMIT 1;"
 
 if [[ "$USE_DOCKER" == "true" ]]; then
-  echo "Test restore completed in temporary Docker Postgres.
-Connect locally with: psql 'postgres://postgres:postgres@localhost:5433/postgres'"
-  echo "The Docker container will continue running until you exit this script. To stop it, press Ctrl-C or run: docker stop $DOCKER_CONTAINER_NAME"
+  echo "Test restore completed successfully in disposable Docker Postgres. The container will now be removed."
 else
-  echo "Test restore completed into target: $RESTORE_DB_URL"
+  echo "Test restore completed successfully into local target."
 fi
-
-# Note: the caller is responsible for stopping/removing the Docker container; container is run with --rm so stopping it removes it.
 
 exit 0
