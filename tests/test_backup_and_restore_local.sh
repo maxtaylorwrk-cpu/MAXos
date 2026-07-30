@@ -49,9 +49,9 @@ fi
 echo "Creating pgcrypto extension in source DB..."
 PGPASSWORD=postgres psql -h localhost -p 5433 -U postgres -d postgres -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;" >/dev/null
 
-# Load fixture
+# Load fixture. ON_ERROR_STOP prevents a partially loaded fixture from producing misleading downstream results.
 echo "Loading fixture into source DB..."
-PGPASSWORD=postgres psql -h localhost -p 5433 -U postgres -d postgres -f "$FIXTURE"
+PGPASSWORD=postgres psql -v ON_ERROR_STOP=1 -h localhost -p 5433 -U postgres -d postgres -f "$FIXTURE"
 
 # Run backup (no encryption for CI test)
 echo "Running backup against source DB..."
