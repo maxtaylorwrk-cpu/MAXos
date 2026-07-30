@@ -1,55 +1,110 @@
-# RECOVERY.md
-
-# Max OS Backup & Recovery (Beginner-friendly)
+# Max OS Backup & Recovery
 
 This document describes how to create, verify, and test-restore backups for Max OS.
-Follow these steps locally — do NOT commit any secrets or credentials.
+Follow these steps locally. Do **not** commit credentials, passphrases, or backup data.
 
-1) Prerequisites (local machine)
-   - Install required CLI tools: psql, pg_dump, pg_restore (Postgres client), gpg, tar, jq, docker (for test restores).
-   - Run the doctor:
-     ./scripts/maxos-backup-cli.sh doctor
+## 1. Prerequisites
 
-2) Dry run (no DB access)
-   ./scripts/backup/maxos-backup.sh --outdir /tmp/maxos-backups --dry-run
+Install:
 
-3) Create a real backup (owner only)
-   - Export your DB URL locally (do NOT commit):
-     export BACKUP_DB_URL='postgres://user:password@host:5432/postgres'
-   - Create an encrypted backup and write to an outdir:
-     ./scripts/maxos-backup-cli.sh create --outdir "$HOME/maxos-backups" --encrypt
-   - The script will produce:
-     - A timestamped backup directory: $OUTDIR/maxos-<TS>/
-     - manifest.json (contains metadata and file list)
-     - manifest.sha256 (plaintext checksums)
-     - A compressed archive: maxos-<TS>.tar.gz (or .tar.gz.gpg when encrypted)
+- `psql`, `pg_dump`, `pg_restore` (Postgres client tools)
+- `gpg`
+- `tar`
+- `jq`
+- Docker (for the safest isolated restore test)
 
-4) Verify the backup (local)
-   ./scripts/maxos-backup-cli.sh verify /path/to/maxos-<TS>.tar.gz[.gpg]
+Run the doctor:
 
-5) Test restore (isolated)
-   - By default, test restore uses Docker to start an isolated Postgres and restores INTO IT.
-     ./scripts/maxos-backup-cli.sh restore-test /path/to/maxos-<TS>.tar.gz[.gpg]
-   - To target an existing local Postgres (for testing only):
-     ./scripts/restore/maxos-restore-test.sh /path/to/archive --no-docker --target-postgres "postgres://user:pass@host:5432/postgres"
-   - The restore scripts refuse production-like targets by default. Use scripts/restore/confirm-production.sh to explicitly confirm if you need to restore into production (not recommended unless you know what you're doing).
+```bash
+./scripts/maxos-backup-cli.sh doctor
+```
 
-6) Where to store backups
-   - Upload encrypted archives to an off-platform, secure storage (S3 with server-side encryption, Backblaze B2, an encrypted external drive, or similar).
-   - Always keep at least two independent copies (different providers or provider + offline physical copy).
+## 2. Dry run
 
-7) Encryption & passphrase
-   - Encryption uses GPG symmetric AES256. You will be prompted for a passphrase when encrypting.
-   - Store the passphrase in a password manager and keep a secure offline physical copy. Losing the passphrase makes backups unrecoverable.
+No database access is performed:
 
-Owner live-verification checklist (run locally, do not commit credentials)
-  - Run doctor and ensure tools are available
-  - Create an encrypted backup with the real BACKUP_DB_URL
-  - Run verify on the produced archive
-  - Run restore-test locally and confirm row counts and sample Unicode/multiline content
-  - Upload encrypted archive to your chosen off-platform storage and confirm upload success
+```bash
+./scripts/backup/maxos-backup.sh --outdir /tmp/maxos-backups --dry-run
+```
 
-Notes
-  - The manifest.json includes metadata fields: maxos_repo, maxos_commit (best-effort), tool_version, table row counts, and file entries with size + sha256.
-  - manifest.sha256 is a plaintext checksum file for quick verification.
+## 3. Create a real encrypted backup — owner only
 
+Set the real database URL only in your local shell/session:
+
+```bash
+export BACKUP_DB_URL='postgres://user:password@host:5432/postgres'
+./scripts/maxos-backup-cli.sh create --outdir "$HOME/maxos-backups" --encrypt
+```
+
+By default, GPG prompts securely for the encryption passphrase.
+
+For controlled non-interactive use, `BACKUP_ENCRYPTION_PASSPHRASE` is supported. Do not commit or log its value, and unset it after use:
+
+```bash
+export BACKUP_ENCRYPTION_PASSPHRASE='your-passphrase-from-a-password-manager'
+# run create / verify / restore-test
+unset BACKUP_ENCRYPTION_PASSPHRASE
+```
+
+The backup contains:
+
+- a timestamped backup directory
+- a Postgres custom-format dump
+- per-table CSV exports
+- `manifest.json` with metadata, row counts, and payload-file metadata
+- `manifest.sha256` for integrity verification
+- a compressed archive (`.tar.gz`) or encrypted archive (`.tar.gz.gpg`)
+
+## 4. Verify the backup
+
+```bash
+./scripts/maxos-backup-cli.sh verify /path/to/maxos-<TS>.tar.gz.gpg
+```
+
+Verification checks archive extraction safety, manifest validity, SHA-256 checksums, and whether `pg_restore` can read the dump.
+
+## 5. Test restore — isolated/local only
+
+Preferred: let the tool create a disposable local Postgres container:
+
+```bash
+./scripts/maxos-backup-cli.sh restore-test /path/to/maxos-<TS>.tar.gz.gpg
+```
+
+Or restore into an existing **local-only** Postgres instance:
+
+```bash
+./scripts/restore/maxos-restore-test.sh /path/to/archive.tar.gz.gpg \
+  --no-docker \
+  --target-postgres 'postgres://user:pass@localhost:5432/postgres'
+```
+
+`restore-test` intentionally refuses remote targets. It is not a production-restore command.
+
+## 6. Store verified copies off-platform
+
+After verification:
+
+- Keep only encrypted archives in off-platform storage.
+- Maintain at least two independent copies, such as two providers or one provider plus an encrypted offline drive.
+- Store the GPG passphrase separately in a password manager and a secure offline recovery location.
+- Losing the passphrase makes the encrypted backup unrecoverable.
+
+## Owner live-verification checklist
+
+The automated CI uses only synthetic data. To close the real continuity gap, the owner must locally:
+
+- Run the doctor.
+- Create an encrypted backup using the real `BACKUP_DB_URL`.
+- Verify the encrypted archive.
+- Restore it into an isolated/local test Postgres instance.
+- Confirm the five application-table row counts and sample Unicode/multiline content.
+- Store at least two verified encrypted copies off-platform.
+- Record the verification date without storing credentials or private account identifiers in documentation.
+
+## Safety notes
+
+- CI must never receive production database credentials.
+- `restore-test` must remain local/test-only.
+- Do not commit backup archives, database URLs, passphrases, or exported personal data.
+- The live Supabase database remains the source of truth until a backup is created; backups are recovery copies, not the live datastore.
