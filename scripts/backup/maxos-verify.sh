@@ -20,7 +20,7 @@ fi
 TARGET="$1"
 
 # helper: error
-err(){ echo "ERROR: $*" >&2; exit 2 }
+err(){ echo "ERROR: $*" >&2; exit 2; }
 
 # locate scripts dir
 SCRIPTDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
