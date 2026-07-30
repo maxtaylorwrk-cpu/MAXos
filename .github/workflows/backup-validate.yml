@@ -2,7 +2,7 @@ name: CI - Backup validation
 
 on:
   pull_request:
-    branches: [ 'backup/implement-offplatform-backup' ]
+    branches: [ 'main' ]
   push:
     branches: [ 'backup/implement-offplatform-backup' ]
 
