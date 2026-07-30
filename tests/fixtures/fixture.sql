@@ -40,8 +40,8 @@ INSERT INTO conversations (id, title, created_at) VALUES
   ('00000000-0000-0000-0000-000000000002', 'Multiline chat', now());
 
 INSERT INTO messages (id, conversation_id, content, created_at) VALUES
-  ('00000000-0000-0000-0000-000000000011', 'Hello, world! 👋', '2024-01-01T12:00:00Z'),
-  ('00000000-0000-0000-0000-000000000012', 'Line1\nLine2\nLine3', '2024-01-02T13:00:00Z');
+  ('00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000001', 'Hello, world! 👋', '2024-01-01T12:00:00Z'),
+  ('00000000-0000-0000-0000-000000000012', '00000000-0000-0000-0000-000000000002', 'Line1\nLine2\nLine3', '2024-01-02T13:00:00Z');
 
 INSERT INTO journal_entries (id, content, created_at) VALUES
   ('00000000-0000-0000-0000-000000000021', 'Today I learned: emojis 👍 and accents éèà', '2024-01-03T14:00:00Z'),
