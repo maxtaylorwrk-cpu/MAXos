@@ -16,12 +16,13 @@ print_usage() {
     "" \
     "Options:" \
     "  --outdir DIR      Directory where backups and manifest will be written (required)" \
-    "  --encrypt         Encrypt the final archive using GPG symmetric AES256 (interactive passphrase)" \
+    "  --encrypt         Encrypt the final archive using GPG symmetric AES256" \
     "  --dry-run         Show what would be done without contacting the database" \
     "  --help            Show this help" \
     "" \
     "Environment (set locally, not in Git):" \
-    "  BACKUP_DB_URL     Postgres connection URL for the database to back up (required unless --dry-run)" \
+    "  BACKUP_DB_URL                  Postgres connection URL for the database to back up" \
+    "  BACKUP_ENCRYPTION_PASSPHRASE   Optional non-interactive GPG passphrase; otherwise GPG prompts securely" \
     "" \
     "Example:" \
     "  BACKUP_DB_URL=postgres://user:pass@host:5432/postgres ./scripts/backup/maxos-backup.sh --outdir \"$HOME/maxos-backups\" --encrypt" \
@@ -122,7 +123,6 @@ if command -v git >/dev/null 2>&1; then
 fi
 # Normalize repo identifier if present
 if [[ -n "$GIT_REPO" ]]; then
-  # strip .git suffix and convert to owner/repo form when possible
   GIT_REPO=$(echo "$GIT_REPO" | sed -E 's/\.git$//' | sed -E 's#.*[:/](.+/.+)$#\1#')
 fi
 
@@ -209,8 +209,13 @@ echo "Creating compressed archive..."
 tar -C "$OUTDIR" -czf "$ARCHIVE" "$BACKUP_NAME"
 
 if [[ "$ENCRYPT" == "true" ]]; then
-  echo "Encrypting archive with GPG (symmetric AES256). You will be prompted for a passphrase."
-  gpg --batch --yes --symmetric --cipher-algo AES256 --output "$ARCHIVE_GPG" "$ARCHIVE"
+  echo "Encrypting archive with GPG (symmetric AES256)..."
+  if [[ -n "${BACKUP_ENCRYPTION_PASSPHRASE-}" ]]; then
+    printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --symmetric --cipher-algo AES256 --output "$ARCHIVE_GPG" "$ARCHIVE"
+  else
+    echo "GPG will prompt securely for a passphrase."
+    gpg --yes --symmetric --cipher-algo AES256 --output "$ARCHIVE_GPG" "$ARCHIVE"
+  fi
   rm -f "$ARCHIVE"
   echo "Backup encrypted: $ARCHIVE_GPG"
   FINAL_PATH="$ARCHIVE_GPG"
@@ -225,7 +230,11 @@ if [[ "$ENCRYPT" == "true" ]]; then
   TMP_DIR=$(mktemp -d)
   trap 'rm -rf "$TMP_DIR"' EXIT
   echo "Decrypting archive to temporary location for verification..."
-  gpg --batch --yes --output "$TMP_DIR/${BACKUP_NAME}.tar.gz" --decrypt "$FINAL_PATH"
+  if [[ -n "${BACKUP_ENCRYPTION_PASSPHRASE-}" ]]; then
+    printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --output "$TMP_DIR/${BACKUP_NAME}.tar.gz" --decrypt "$FINAL_PATH"
+  else
+    gpg --yes --output "$TMP_DIR/${BACKUP_NAME}.tar.gz" --decrypt "$FINAL_PATH"
+  fi
   tar -C "$TMP_DIR" -xzf "$TMP_DIR/${BACKUP_NAME}.tar.gz"
   if ! pg_restore --list "$TMP_DIR/$BACKUP_NAME/${BACKUP_NAME}.dump" >/dev/null 2>&1; then
     echo "ERROR: pg_restore cannot read dump in decrypted archive" >&2
