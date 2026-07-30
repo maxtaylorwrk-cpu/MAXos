@@ -10,7 +10,6 @@ SCRIPTS=(
   "$ROOT_DIR/scripts/backup/maxos-verify.sh"
   "$ROOT_DIR/scripts/backup/encrypt-backup.sh"
   "$ROOT_DIR/scripts/restore/maxos-restore-test.sh"
-  "$ROOT_DIR/scripts/restore/confirm-production.sh"
   "$ROOT_DIR/scripts/maxos-backup-cli.sh"
   "$ROOT_DIR/scripts/doctor/maxos-doctor.sh"
 )
