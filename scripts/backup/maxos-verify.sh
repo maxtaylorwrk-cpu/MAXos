@@ -10,7 +10,7 @@ usage() {
   printf '%s\n' \
     "Usage: $PROG /path/to/maxos-YYYYmmddTHHMMSSZ.tar.gz[.gpg] or /path/to/backupdir" \
     "" \
-    "If the archive is encrypted (.gpg), you will be prompted for the GPG passphrase to decrypt temporarily." \
+    "If the archive is encrypted (.gpg), GPG will prompt securely unless BACKUP_ENCRYPTION_PASSPHRASE is set." \
     ""
 }
 
@@ -19,11 +19,25 @@ if [[ ${1-} == "" ]]; then
 fi
 TARGET="$1"
 
-# helper: error
+TMPDIR=""
+CLEAN_TMP=false
+cleanup() {
+  if [[ "$CLEAN_TMP" == true && -n "$TMPDIR" && -d "$TMPDIR" ]]; then
+    rm -rf "$TMPDIR"
+  fi
+}
+trap cleanup EXIT
+
 err(){ echo "ERROR: $*" >&2; exit 2; }
 
-# locate scripts dir
-SCRIPTDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+safe_extract_tar() {
+  local archive="$1"
+  local destination="$2"
+  if tar -tzf "$archive" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+    err "Archive contains unsafe absolute or parent-directory paths"
+  fi
+  tar -C "$destination" -xzf "$archive" || err "Failed to extract archive"
+}
 
 # basic checks
 if [[ ! -e "$TARGET" ]]; then
@@ -31,22 +45,22 @@ if [[ ! -e "$TARGET" ]]; then
 fi
 
 # decide whether target is archive or directory
-TMPDIR=""
-CLEAN_TMP=false
 if [[ "$TARGET" == *.gpg ]]; then
-  # encrypted archive: decrypt to temp
   TMPDIR=$(mktemp -d)
   CLEAN_TMP=true
   echo "Decrypting archive for verification into temporary directory..."
-  gpg --batch --yes --output "$TMPDIR/archive.tar.gz" --decrypt "$TARGET" || err "GPG decryption failed"
-  tar -C "$TMPDIR" -xzf "$TMPDIR/archive.tar.gz" || err "Failed to extract decrypted archive"
-  BACKUP_DIR=$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d | head -n1)
+  if [[ -n "${BACKUP_ENCRYPTION_PASSPHRASE-}" ]]; then
+    printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --output "$TMPDIR/archive.tar.gz" --decrypt "$TARGET" || err "GPG decryption failed"
+  else
+    gpg --yes --output "$TMPDIR/archive.tar.gz" --decrypt "$TARGET" || err "GPG decryption failed"
+  fi
+  safe_extract_tar "$TMPDIR/archive.tar.gz" "$TMPDIR"
+  BACKUP_DIR=$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d -print -quit)
 elif [[ -f "$TARGET" ]]; then
-  # unencrypted tar.gz
   TMPDIR=$(mktemp -d)
   CLEAN_TMP=true
-  tar -C "$TMPDIR" -xzf "$TARGET" || err "Failed to extract archive"
-  BACKUP_DIR=$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d | head -n1)
+  safe_extract_tar "$TARGET" "$TMPDIR"
+  BACKUP_DIR=$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d -print -quit)
 elif [[ -d "$TARGET" ]]; then
   BACKUP_DIR="$TARGET"
 else
@@ -69,10 +83,14 @@ if [[ ! -f "$MANIFEST_SHA" ]]; then
   err "Missing manifest.sha256 in backup"
 fi
 
+# Validate manifest JSON before trusting its summary output.
+if command -v jq >/dev/null 2>&1; then
+  jq empty "$MANIFEST_JSON" || err "manifest.json is not valid JSON"
+fi
+
 # Verify checksums listed in manifest.sha256
 echo "Verifying SHA256 checksums..."
 pushd "$BACKUP_DIR" >/dev/null
-# Use sha256sum or shasum
 if command -v sha256sum >/dev/null 2>&1; then
   sha256sum -c "$MANIFEST_SHA" || err "Checksum verification failed"
 elif command -v shasum >/dev/null 2>&1; then
@@ -85,7 +103,7 @@ popd >/dev/null
 echo "Checksums OK"
 
 # Attempt to read the dump file with pg_restore --list
-DUMP_FILE=$(find "$BACKUP_DIR" -type f -name "*.dump" | head -n1)
+DUMP_FILE=$(find "$BACKUP_DIR" -type f -name "*.dump" -print -quit)
 if [[ -z "$DUMP_FILE" ]]; then
   err "No .dump file found in backup"
 fi
@@ -96,18 +114,11 @@ fi
 
 echo "pg_restore can read the dump file"
 
-# Optionally report simple manifest summary
 if command -v jq >/dev/null 2>&1; then
   echo "Manifest summary:"
   jq '{backup_name: .backup_name, created_at: .created_at, tables: .tables}' "$MANIFEST_JSON"
 fi
 
-# Cleanup
-if [[ "$CLEAN_TMP" == true && -n "$TMPDIR" ]]; then
-  rm -rf "$TMPDIR"
-fi
-
 echo "Integrity verification passed"
-
 echo "Verification complete: backup appears consistent and readable."
 exit 0
