@@ -1,0 +1,38 @@
+name: CI - Backup validation
+
+on:
+  pull_request:
+    branches: [ 'main' ]
+  push:
+    branches: [ 'backup/implement-offplatform-backup' ]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client gnupg jq pwgen build-essential
+          # Docker is available on GitHub-hosted runners; ensure it's healthy
+          docker --version || true
+
+      - name: Make test scripts executable
+        run: |
+          chmod +x ./tests/*.sh || true
+          chmod +x ./scripts/**/*.sh || true
+
+      - name: Run shell syntax & doctor smoke test
+        run: |
+          ./tests/test_shell_syntax.sh
+
+      - name: Run integration test (requires Docker available)
+        env:
+          CI: true
+        run: |
+          ./tests/test_backup_and_restore_local.sh

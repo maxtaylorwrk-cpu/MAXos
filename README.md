@@ -77,7 +77,13 @@ Finish and verify the core loop before adding modules:
 
 `owner key → home → Lola chat → journal → search → knowledge review`
 
-The largest continuity gap still open is a verified off-platform backup of live Supabase data. Code and schema are recoverable from GitHub; conversations, messages, journals, and operational knowledge still need a durable backup process.
+The remaining continuity priority is a verified owner-run off-platform backup of live Supabase data. This repository now includes backup, verification, encryption, and isolated restore-test tooling with synthetic CI validation; live data is still verified only by the owner.
+
+## Backup and recovery
+
+Backup tooling lives under `scripts/backup/` and `scripts/restore/`. The recovery runbook is `docs/RECOVERY.md`.
+
+CI validates synthetic plain and encrypted backup/verify/restore-test round trips using ephemeral local Postgres containers only. CI must never use production credentials or production data.
 
 ## Maintenance protocol
 

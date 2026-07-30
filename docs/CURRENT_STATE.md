@@ -1,6 +1,6 @@
 # Max OS Current State
 
-_Last updated: 2026-07-28_
+_Last updated: 2026-07-30_
 
 This file is the lightweight handoff for the next engineering or AI session.
 
@@ -84,6 +84,25 @@ Decision:
 - Original migration history and deployed source are versioned in GitHub.
 - `skills/max-os-maintainer/SKILL.md` defines the maintenance protocol for future AI agents.
 
+## Backup continuity work
+
+PR #1 adds off-platform backup/recovery tooling for the five core application tables.
+
+Current backup subsystem includes:
+
+- Postgres custom-format dump plus per-table CSV exports.
+- Valid JSON manifest with row counts and payload metadata.
+- SHA-256 integrity verification without self-referential checksums.
+- Optional GPG symmetric AES256 encryption.
+- Plain and encrypted archive verification.
+- Isolated restore testing against disposable/local Postgres only.
+- Synthetic CI fixtures with Unicode/multiline coverage intent.
+- GitHub Actions validation using ephemeral Postgres containers; production credentials/data are not used.
+
+The automated path is not the live source of truth for data. The remaining owner-only step is to create an encrypted backup from the real Supabase/Postgres database, verify it, restore it into an isolated local test database, and store verified encrypted copies off-platform.
+
+Production restore is intentionally not implemented by `restore-test`; that command accepts only loopback/local targets.
+
 ## Secrets
 
 Custom runtime secrets actually needed by V1:
@@ -96,24 +115,28 @@ Supabase server environment:
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 
+Backup tooling may use locally:
+
+- `BACKUP_DB_URL`
+- `BACKUP_ENCRYPTION_PASSPHRASE` — optional non-interactive GPG input; do not commit it and unset it after use.
+
 `SESSION_SECRET` is retired and can be removed from the project later.
 
 Never commit or paste secret values into GitHub, Notion, or AI chat.
 
 ## Biggest remaining continuity risk
 
-**Live Supabase data does not yet have a verified off-platform backup/restore process.**
+**The live Supabase dataset still needs an owner-verified off-platform backup and isolated restore.**
 
-GitHub can reconstruct code and schema, but conversations, messages, journal entries, and live knowledge could still be lost if the Supabase project/data were destroyed.
-
-This is more important for long-term Max OS durability than adding more authentication layers.
+GitHub can reconstruct code and schema, and the backup tooling is synthetically validated, but conversations, messages, journal entries, and live knowledge are not considered durably protected until the owner live-verification checklist in `docs/RECOVERY.md` is completed.
 
 ## Still unresolved
 
 - Confirm the owner key you intend to use is set as `APP_PASSPHRASE` and is unique to Max OS.
 - Confirm/rotate `GROQ_API_KEY` if its value was ever exposed in chat.
 - End-to-end test: owner key → home → Lola chat → journal → search → knowledge review.
-- Establish and test an off-platform live-data backup/restore process.
+- Complete the owner-only live encrypted backup + isolated restore verification.
+- Store at least two independent encrypted off-platform copies after verification.
 - GitHub repository is temporarily public for setup/debugging and should be returned to private after the current integration work is complete.
 
 ## Claude resumption rule
@@ -130,6 +153,6 @@ When Claude returns, it must first:
 
 ## Next engineering priority
 
-**Use and verify V1, then build backup continuity.**
+**Finish backup continuity verification, then use and verify V1.**
 
 Do not add multi-user authentication or speculative modules unless a real use case appears.

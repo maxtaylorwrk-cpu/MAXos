@@ -1,102 +1,110 @@
-# RECOVERY
+# Max OS Backup & Recovery
 
-This document describes how to rebuild Max OS if Supabase, GitHub, the AI provider, or the frontend deployment changes or is lost.
+This document describes how to create, verify, and test-restore backups for Max OS.
+Follow these steps locally. Do **not** commit credentials, passphrases, or backup data.
 
-## 1. Restore source
+## 1. Prerequisites
 
-- Clone/download this GitHub repository.
-- Read `docs/CURRENT_STATE.md` before deploying anything.
-- Read `skills/max-os-maintainer/SKILL.md` so stale AI context does not overwrite newer state.
+Install:
 
-## 2. Create/connect Supabase
+- `psql`, `pg_dump`, `pg_restore` (Postgres client tools)
+- `gpg`
+- `tar`
+- `jq`
+- Docker (for the safest isolated restore test)
 
-- Create a Supabase project or choose a recovery project.
-- Confirm the project exposes the normal server environment values used by Edge Functions.
+Run the doctor:
 
-## 3. Apply migrations
+```bash
+./scripts/maxos-backup-cli.sh doctor
+```
 
-Apply the committed SQL migrations under `supabase/migrations/` in version order.
+## 2. Dry run
 
-The current production migration history is documented in `docs/CURRENT_STATE.md`.
+No database access is performed:
 
-After migration:
+```bash
+./scripts/backup/maxos-backup.sh --outdir /tmp/maxos-backups --dry-run
+```
 
-- verify the five application tables exist;
-- verify RLS is enabled;
-- verify direct `anon` / `authenticated` table grants are absent.
+## 3. Create a real encrypted backup — owner only
 
-## 4. Configure runtime secrets
+Set the real database URL only in your local shell/session:
 
-Custom secrets needed by simplified V1:
+```bash
+export BACKUP_DB_URL='postgres://user:password@host:5432/postgres'
+./scripts/maxos-backup-cli.sh create --outdir "$HOME/maxos-backups" --encrypt
+```
 
-- `APP_PASSPHRASE` — the one-user owner key (legacy environment name).
-- `GROQ_API_KEY`
+By default, GPG prompts securely for the encryption passphrase.
 
-Supabase server environment used by Edge Functions:
+For controlled non-interactive use, `BACKUP_ENCRYPTION_PASSPHRASE` is supported. Do not commit or log its value, and unset it after use:
 
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
+```bash
+export BACKUP_ENCRYPTION_PASSPHRASE='your-passphrase-from-a-password-manager'
+# run create / verify / restore-test
+unset BACKUP_ENCRYPTION_PASSPHRASE
+```
 
-`SESSION_SECRET` is retired and is not required by current V1.
+The backup contains:
 
-Never place secret values in GitHub, Notion, tickets, or AI chat.
+- a timestamped backup directory
+- a Postgres custom-format dump
+- per-table CSV exports
+- `manifest.json` with metadata, row counts, and payload-file metadata
+- `manifest.sha256` for integrity verification
+- a compressed archive (`.tar.gz`) or encrypted archive (`.tar.gz.gpg`)
 
-## 5. Deploy Edge Functions
+## 4. Verify the backup
 
-Deploy from the exact committed source under:
+```bash
+./scripts/maxos-backup-cli.sh verify /path/to/maxos-<TS>.tar.gz.gpg
+```
 
-- `supabase/functions/app/index.ts`
-- `supabase/functions/api/index.ts`
-- `supabase/functions/chat/index.ts`
-- `supabase/functions/auth/index.ts` (legacy retirement response only)
+Verification checks archive extraction safety, manifest validity, SHA-256 checksums, and whether `pg_restore` can read the dump.
 
-Current functions use `verify_jwt = false` intentionally because the application uses its own single-owner key rather than Supabase Auth JWTs.
+## 5. Test restore — isolated/local only
 
-Do not blindly change this during recovery.
+Preferred: let the tool create a disposable local Postgres container:
 
-## 6. Verify the owner boundary
+```bash
+./scripts/maxos-backup-cli.sh restore-test /path/to/maxos-<TS>.tar.gz.gpg
+```
 
-Expected behavior:
+Or restore into an existing **local-only** Postgres instance:
 
-- App shell is publicly reachable.
-- `api` and `chat` reject a missing/wrong `x-maxos-key` with `401`.
-- Correct owner key allows application requests.
-- Browser never receives the service-role key or Groq key.
-- Legacy `auth` endpoint returns a retirement response and is not used by current frontend code.
+```bash
+./scripts/restore/maxos-restore-test.sh /path/to/archive.tar.gz.gpg \
+  --no-docker \
+  --target-postgres 'postgres://user:pass@localhost:5432/postgres'
+```
 
-## 7. End-to-end test
+`restore-test` intentionally refuses remote targets. It is not a production-restore command.
 
-Test in this order:
+## 6. Store verified copies off-platform
 
-1. Enter owner key.
-2. Home loads.
-3. Lola chat returns a response and persists both messages.
-4. Journal can create and reload an entry.
-5. Search returns expected records.
-6. Knowledge review can list and approve/reject a suggestion.
-7. Reload the app and confirm the stored owner key still unlocks the same device.
-8. Use **Lock** and confirm the local owner key is removed.
+After verification:
 
-## 8. Data restore
+- Keep only encrypted archives in off-platform storage.
+- Maintain at least two independent copies, such as two providers or one provider plus an encrypted offline drive.
+- Store the GPG passphrase separately in a password manager and a secure offline recovery location.
+- Losing the passphrase makes the encrypted backup unrecoverable.
 
-Code/schema recovery is not the same as data recovery.
+## Owner live-verification checklist
 
-A real long-term recovery process must restore:
+The automated CI uses only synthetic data. To close the real continuity gap, the owner must locally:
 
-- conversations
-- messages
-- journal entries
-- knowledge items
-- knowledge suggestions
+- Run the doctor.
+- Create an encrypted backup using the real `BACKUP_DB_URL`.
+- Verify the encrypted archive.
+- Restore it into an isolated/local test Postgres instance.
+- Confirm the five application-table row counts and sample Unicode/multiline content.
+- Store at least two verified encrypted copies off-platform.
+- Record the verification date without storing credentials or private account identifiers in documentation.
 
-At the time of this document's update, an off-platform live-data backup process is still an open requirement. Do not claim full disaster recovery until a backup has been created and a restore drill has succeeded.
+## Safety notes
 
-## 9. Notion continuity
-
-Notion is not a runtime dependency, but it contains human-readable Max OS context and should also have an independent export/backup strategy over time.
-
-## Recovery success standard
-
-Recovery is complete only when a fresh environment can reproduce the working owner-key → database → Lola loop and restore the expected historical data.
-
-A checklist without a demonstrated restore is not proof of recoverability.
+- CI must never receive production database credentials.
+- `restore-test` must remain local/test-only.
+- Do not commit backup archives, database URLs, passphrases, or exported personal data.
+- The live Supabase database remains the source of truth until a backup is created; backups are recovery copies, not the live datastore.
