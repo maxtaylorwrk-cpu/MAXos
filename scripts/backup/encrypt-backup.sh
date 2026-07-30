@@ -17,12 +17,16 @@ fi
 OUT="${ARCHIVE}.gpg"
 
 echo "Encrypting $ARCHIVE -> $OUT using GPG symmetric AES256..."
-
-gpg --batch --yes --symmetric --cipher-algo AES256 --output "$OUT" "$ARCHIVE"
+if [[ -n "${BACKUP_ENCRYPTION_PASSPHRASE-}" ]]; then
+  printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --symmetric --cipher-algo AES256 --output "$OUT" "$ARCHIVE"
+else
+  echo "GPG will prompt securely for a passphrase."
+  gpg --yes --symmetric --cipher-algo AES256 --output "$OUT" "$ARCHIVE"
+fi
 
 if [[ -f "$OUT" ]]; then
   echo "Encrypted archive created: $OUT"
-  echo "Note: store your passphrase in a password manager and/or a secure offline copy. Losing the passphrase will make this backup unrecoverable."
+  echo "Store the passphrase in a password manager and/or a secure offline copy. Losing it makes this backup unrecoverable."
   exit 0
 else
   echo "ERROR: encryption failed" >&2
