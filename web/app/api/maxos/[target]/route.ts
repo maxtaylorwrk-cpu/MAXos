@@ -10,7 +10,7 @@ export async function POST(
   context: { params: Promise<{ target: string }> },
 ) {
   const { target } = await context.params;
-  if (!(target in UPSTREAMS)) {
+  if (!Object.hasOwn(UPSTREAMS, target)) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
 
