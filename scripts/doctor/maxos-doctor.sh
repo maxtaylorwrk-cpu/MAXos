@@ -2,65 +2,75 @@
 set -euo pipefail
 
 # scripts/doctor/maxos-doctor.sh
-# Simple health-check (doctor) for Max OS backup tools.
+# Beginner-friendly health check for Max OS backup tooling.
 
-SCRIPTDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/..
-source "$SCRIPTDIR/common/env-validate.sh" || true
+echo "Max OS doctor: checking local backup/recovery environment"
 
-echo "Max OS doctor: checking local environment"
-
-# Check required commands
 MISSING=()
-for cmd in pg_dump pg_restore psql gpg jq tar sha256sum shasum docker; do
+for cmd in pg_dump pg_restore psql gpg jq tar; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     MISSING+=("$cmd")
   fi
 done
 
+if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+  MISSING+=("sha256sum-or-shasum")
+fi
+
 if [[ ${#MISSING[@]} -ne 0 ]]; then
-  echo "WARNING: Missing commands: ${MISSING[*]}"
-  echo "  -> On macOS: install with Homebrew, e.g. 'brew install postgresql gpg jq docker'"
-  echo "  -> On Debian/Ubuntu: apt-get install postgresql-client gnupg jq docker.io" 
+  echo "WARNING: Missing required backup tools: ${MISSING[*]}"
+  echo "  -> macOS: Homebrew packages commonly include postgresql, gnupg, jq; tar/shasum are normally available."
+  echo "  -> Debian/Ubuntu: install postgresql-client, gnupg, jq; tar/sha256sum are normally available."
 else
-  echo "All required CLI tools appear to be installed"
+  echo "All required backup/verification CLI tools appear to be installed."
 fi
 
-# Check BACKUP_DB_URL presence (do not print it)
 if [[ -z "${BACKUP_DB_URL-}" ]]; then
-  echo "NOTE: BACKUP_DB_URL is not set. You must export BACKUP_DB_URL for real backups. Use --dry-run to test without a DB. See .env.example"
+  echo "NOTE: BACKUP_DB_URL is not set. That is fine for doctor/dry-run; it is required for a real backup."
 else
-  echo "BACKUP_DB_URL is set (not displayed for security)."
+  echo "BACKUP_DB_URL is set (value intentionally not displayed)."
 fi
 
-# Check disk space for default outdir ($HOME/maxos-backups)
+if [[ -n "${BACKUP_ENCRYPTION_PASSPHRASE-}" ]]; then
+  echo "BACKUP_ENCRYPTION_PASSPHRASE is set (value intentionally not displayed). Unset it after use."
+else
+  echo "Encryption passphrase env var is not set; GPG will prompt securely when encryption/decryption needs a passphrase."
+fi
+
 OUTDIR_DEFAULT="$HOME/maxos-backups"
 if [[ -d "$OUTDIR_DEFAULT" ]]; then
   avail=$(df -h "$OUTDIR_DEFAULT" | awk 'NR==2{print $4}')
   echo "Available disk space at $OUTDIR_DEFAULT: $avail"
 else
-  echo "No default backup directory at $OUTDIR_DEFAULT (this is fine). To create backups, choose an outdir with enough space and pass --outdir to the create command."
+  echo "No default backup directory at $OUTDIR_DEFAULT yet (this is fine)."
 fi
 
-# Check Docker availability
+# Docker is preferred for isolated restore testing but is not required for backup creation/verification.
 if command -v docker >/dev/null 2>&1; then
   if docker info >/dev/null 2>&1; then
-    echo "Docker appears available and running (used for isolated test-restore)."
+    echo "Docker is available and running for disposable isolated restore tests."
   else
-    echo "Docker is installed but not running or the current user cannot access it. The test-restore will fail unless Docker is fixed or --no-docker + --target-postgres is used."
+    echo "WARNING: Docker is installed but not running or inaccessible. Use a local-only --no-docker target if needed."
   fi
 else
-  echo "Docker not installed. Test restore will require an existing Postgres instance and --no-docker + --target-postgres." 
+  echo "NOTE: Docker is not installed. Backup creation/verification can still work; restore-test needs Docker or an existing localhost Postgres target."
 fi
 
-# Recommend encryption passphrase storage
 cat <<EOF
 Encryption guidance:
- - Default symmetric encryption uses GPG (AES256). When encrypting, store the passphrase in a password manager and keep an offline physical copy in a safe.
- - Losing the passphrase makes backups unrecoverable.
+  - GPG symmetric AES256 is used for encrypted archives.
+  - Store the passphrase in a password manager plus a secure offline recovery location.
+  - Losing the passphrase makes encrypted backups unrecoverable.
 
-Next steps:
- - Run a dry run: ./scripts/backup/maxos-backup.sh --outdir /tmp/maxos-backups --dry-run
- - Run the doctor again after installing any missing tools.
+Safety:
+  - restore-test accepts only local/loopback database targets.
+  - Never put production credentials into CI or commit them to Git.
+
+Next step:
+  ./scripts/backup/maxos-backup.sh --outdir /tmp/maxos-backups --dry-run
 EOF
 
+if [[ ${#MISSING[@]} -ne 0 ]]; then
+  exit 1
+fi
 exit 0
