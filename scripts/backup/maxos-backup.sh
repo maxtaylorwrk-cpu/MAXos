@@ -146,61 +146,59 @@ for t in "${TABLES[@]}"; do
   COUNTS[$t]=$cnt
 done
 
-# Create manifest.json (include metadata for traceability)
-cat > "$MANIFEST_JSON" <<EOF
-{
-  "backup_name": "$BACKUP_NAME",
-  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "maxos_repo": "${GIT_REPO}",
-  "maxos_commit": "${GIT_COMMIT}",
-  "tool_version": "${TOOL_VERSION}",
-  "tables": {
-$(for t in "${TABLES[@]}"; do echo "    \"$t\": ${COUNTS[$t]},"; done)
-  },
-  "files": []
-}
-EOF
-
-# Compute checksums for all files and append to manifest.sha256
-pushd "$BACKUP_DIR" >/dev/null
-echo "Computing checksums..."
-# ensure manifest.sha256 is created empty
-> "$MANIFEST_SHA"
-for f in *; do
-  if [[ -f "$f" ]]; then
-    $SHA_CMD "$f" >> "$MANIFEST_SHA"
-  fi
+# Build a valid manifest with table counts and an initially empty payload-file list.
+TABLES_JSON='{}'
+for t in "${TABLES[@]}"; do
+  TABLES_JSON=$(jq --arg table "$t" --argjson count "${COUNTS[$t]}" '. + {($table): $count}' <<<"$TABLES_JSON")
 done
 
-# Add file info to manifest.json with sizes and checksum
-# We'll build a JSON array fragment
-FILES_JSON=""
-while read -r line; do
-  checksum=$(echo "$line" | awk '{print $1}')
-  file=$(echo "$line" | awk '{print $2}')
+jq -n \
+  --arg backup_name "$BACKUP_NAME" \
+  --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --arg maxos_repo "$GIT_REPO" \
+  --arg maxos_commit "$GIT_COMMIT" \
+  --arg tool_version "$TOOL_VERSION" \
+  --argjson tables "$TABLES_JSON" \
+  '{backup_name: $backup_name, created_at: $created_at, maxos_repo: $maxos_repo, maxos_commit: $maxos_commit, tool_version: $tool_version, tables: $tables, files: []}' \
+  > "$MANIFEST_JSON"
+
+jq empty "$MANIFEST_JSON"
+
+# Compute payload checksums first. The manifest describes payload files only, avoiding circular self-checksums.
+pushd "$BACKUP_DIR" >/dev/null
+echo "Computing payload checksums..."
+PAYLOAD_SHA=".payload.sha256"
+: > "$PAYLOAD_SHA"
+while IFS= read -r f; do
+  [[ -z "$f" ]] && continue
+  "${SHA_CMD[@]}" "$f" >> "$PAYLOAD_SHA"
+done < <(find . -type f ! -name 'manifest.json' ! -name 'manifest.sha256' ! -name '.payload.sha256' -print | sed 's#^\./##' | LC_ALL=C sort)
+
+FILES_JSON='[]'
+while read -r checksum file; do
+  [[ -z "${checksum:-}" || -z "${file:-}" ]] && continue
   size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file")
-  FILES_JSON+="    {\"path\": \"$file\", \"size\": $size, \"sha256\": \"$checksum\"},\\n"
-done < "$MANIFEST_SHA"
-# remove trailing comma
-FILES_JSON=$(echo -e "$FILES_JSON" | sed '$s/,$//')
+  FILES_JSON=$(jq \
+    --arg path "$file" \
+    --argjson size "$size" \
+    --arg sha256 "$checksum" \
+    '. + [{path: $path, size: $size, sha256: $sha256}]' \
+    <<<"$FILES_JSON")
+done < "$PAYLOAD_SHA"
 
-# Inject files array into manifest.json (naive but acceptable for small number of files)
-python3 - <<PY >/dev/null 2>&1 || true
-import json,sys
-m=json.load(open('$MANIFEST_JSON'))
-files=[]
-for line in open('$MANIFEST_SHA').read().strip().splitlines():
-    parts=line.split()
-    if not parts: continue
-    sha=parts[0]
-    name=parts[1]
-    import os
-    size=os.path.getsize(name)
-    files.append({'path':name,'size':size,'sha256':sha})
-m['files']=files
-json.dump(m,open('$MANIFEST_JSON','w'),indent=2)
-PY
+# Finalize manifest.json before generating the verification checksum file.
+jq --argjson files "$FILES_JSON" '.files = $files' "$MANIFEST_JSON" > "${MANIFEST_JSON}.tmp"
+mv "${MANIFEST_JSON}.tmp" "$MANIFEST_JSON"
+jq empty "$MANIFEST_JSON"
 
+# Generate final checksums for every backup file except manifest.sha256 itself and the temporary payload list.
+: > "$MANIFEST_SHA"
+while IFS= read -r f; do
+  [[ -z "$f" ]] && continue
+  "${SHA_CMD[@]}" "$f" >> "$MANIFEST_SHA"
+done < <(find . -type f ! -name 'manifest.sha256' ! -name '.payload.sha256' -print | sed 's#^\./##' | LC_ALL=C sort)
+
+rm -f "$PAYLOAD_SHA"
 popd >/dev/null
 
 # Optionally encrypt everything into a single tar.gz.gpg
@@ -241,7 +239,7 @@ else
 fi
 
 # Human-friendly summary
-echo "\nMax OS backup created"
+printf '\nMax OS backup created\n'
 echo "Five application tables included: ${TABLES[*]}"
 if [[ "$ENCRYPT" == "true" ]]; then
   echo "Backup encrypted (AES256): $FINAL_PATH"
