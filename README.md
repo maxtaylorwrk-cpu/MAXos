@@ -88,6 +88,10 @@ Future agents should read:
 
 before changing the system.
 
+For portfolio, stock, catalyst, dividend, or options research, future agents should also read:
+
+- `skills/finance-research/SKILL.md`
+
 ## Privacy
 
 The repository is temporarily public during setup/debugging. It is intended to be returned to **private** after the current integration work is complete. No secret values belong in Git regardless of repository visibility.
