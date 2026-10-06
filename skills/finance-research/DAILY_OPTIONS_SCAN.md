@@ -12,7 +12,7 @@ The goal is to search broadly enough to find the best available opportunity with
 
 ## Core sequence
 
-`Live portfolio -> Market regime -> Sector map -> Two-universe scan -> Catalyst/evidence screen -> Candidate triage -> Deep research -> Live options chain -> Risk structure -> Option math -> Portfolio fit -> Daily decision card -> Post-trade learning`
+`Live portfolio -> Market regime -> Sector map -> Two-universe scan -> Catalyst/evidence screen -> Government/congressional sweep -> Optional financial-text triage -> Candidate triage -> Deep research -> Live options chain -> Risk structure -> Option math -> Portfolio fit -> Daily decision card -> Post-trade learning`
 
 ## 1. Live portfolio state
 
@@ -123,6 +123,45 @@ Distinguish:
 - transaction date versus disclosure date;
 - disclosed dollar range rather than pretending an exact amount is known.
 
+### Government + congressional intelligence sweep
+
+Before ranking the final 3-5 names, run a quick sweep for **each serious finalist** and any obviously government-sensitive candidate.
+
+Check for:
+- legislation, appropriations, executive actions, tariffs, export controls, sanctions, tax/policy changes, and agency rulemaking;
+- material agency actions, approvals, investigations, enforcement, procurement notices, grants, loans, contracts, and official program announcements;
+- direct federal awards / USAspending when actual dollar flow matters;
+- recent House and Senate financial disclosures as supporting evidence.
+
+For government news, explicitly classify the relationship as:
+- **direct beneficiary / target**;
+- **supplier / subcontractor**;
+- **sector-sympathy / thematic read-through**;
+- **not material**.
+
+Do not equate authorization, proposed legislation, an agency headline, or a sector-wide policy theme with booked revenue. Verify implementation, recipient mapping, timing, and economic materiality.
+
+For congressional activity:
+- prefer official House Clerk and Senate records when practical;
+- note transaction date and disclosure date separately;
+- note Member versus spouse/dependent, purchase versus sale, security type, and disclosed amount range;
+- flag repeated or clustered activity, but never imply causation, insider knowledge, or a real-time signal;
+- if there is no recent or material congressional activity, say so and move on.
+
+### Optional financial-text catalyst triage
+
+When the candidate/news universe is too large for efficient manual review, a lightweight Hugging Face financial classifier may be used to **triage**, not decide.
+
+Preferred uses:
+- cluster duplicate/syndicated headlines so one story is not counted 20 times;
+- classify headline/event language as positive, negative, neutral, or mixed;
+- rank potentially material company-specific items for primary-source review;
+- identify whether the news appears company-specific or mostly thematic.
+
+Suitable secondary models include `mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis` and `ProsusAI/finbert`.
+
+Never turn model sentiment into a trade recommendation, probability, or substitute for filings, official government sources, company IR, or current market evidence.
+
 ## 6. Candidate triage
 
 Reduce the broad scan to roughly 3-5 finalists before spending time on individual option chains.
@@ -134,8 +173,9 @@ Evaluate each finalist on:
 4. **Evidence quality** — primary filings, company releases, official government data, credible current reporting, insider/congressional context when relevant.
 5. **Options suitability** — usable chain, acceptable spread, sufficient time, reasonable volatility, and a structure that can fit the risk ceiling.
 6. **Portfolio fit** — does it create redundant exposure or improve opportunity versus what Max already owns?
+7. **Government/congressional context** — is there a direct policy/award/regulatory exposure or a recent disclosure cluster that strengthens, contradicts, or simply does not affect the thesis?
 
-Congressional activity, insider activity, and unusual options activity are supporting signals, not mandatory scoring categories and not substitutes for a real thesis.
+Government/congressional evidence is a context multiplier, not a substitute for thesis quality. Congressional activity, insider activity, unusual options activity, and model sentiment are supporting signals and must never be the sole reason for a trade.
 
 ## 7. Deep research on finalists
 
@@ -158,13 +198,13 @@ Use for:
 - primary-source confirmation of headlines.
 
 ### USAspending / official government sources
-Use when a federal contract, award, program, or spending trend is economically material to the thesis.
+Use when a federal contract, award, program, or spending trend is economically material to the thesis. Also check the relevant agency or official policy source when the catalyst is regulatory, legislative, procurement-related, tariff/export-control related, or otherwise government-driven.
 
 ### Current news + company IR
 Use to confirm catalyst timing, management statements, breaking developments, and market interpretation.
 
 ### House / Senate financial disclosures
-Use to validate congressional trading evidence when it matters.
+Use to validate congressional trading evidence for serious finalists when practical. Record transaction date separately from disclosure date and treat the data as lagged context.
 
 ### PyPortfolioOpt
 Use only when correlation, concentration, or portfolio construction could materially change which candidate should be chosen.
@@ -247,6 +287,7 @@ Every completed scan should return:
 - why now;
 - market/sector context;
 - strongest evidence;
+- government/congressional context when material, including whether the company is a direct beneficiary/target or only a sympathy read-through;
 - exact verified option terms if executable;
 - entry assumption;
 - max loss;
