@@ -4,7 +4,7 @@ Use this protocol for portfolio, stock, catalyst, dividend, and options research
 
 ## Mission
 
-Produce evidence-backed investment decisions by combining Max's current portfolio state with current market data, primary-source company information, government-spending data when relevant, options math, portfolio-risk analysis, and post-trade performance learning.
+Produce evidence-backed investment decisions by combining Max's current portfolio state with current market data, primary-source company information, government policy/spending and congressional-trading context, options math, portfolio-risk analysis, and post-trade performance learning.
 
 The goal is not to run every tool on every question. Use the smallest set that can answer the decision correctly, then escalate to specialist tools when the decision type requires them.
 
@@ -82,6 +82,45 @@ When used, ask:
 - Is the public company the direct beneficiary, a subcontractor, or merely thematically related?
 
 Never turn a government announcement into an investment recommendation without testing economic materiality.
+
+### Government + congressional intelligence — standing evidence lane
+
+For every serious finalist, perform a quick **government/congressional sweep** before the final recommendation or options-chain decision. This is a context lane, not an automatic trade signal.
+
+Government context may include, when relevant:
+- new legislation, appropriations, budget language, executive actions, tariffs, export controls, sanctions, tax rules, and policy changes;
+- agency actions, investigations, approvals, enforcement, rulemaking, procurement, grants, loans, and contracts;
+- DoD, DOE, HHS/FDA, Commerce, Treasury, FTC, FCC, EPA, SEC, NASA, DHS, and other agency developments that can materially affect the company or sector;
+- USAspending or other official award data when actual federal dollars matter;
+- policy-sensitive sector read-throughs in defense, space, AI/semiconductors, cybersecurity, nuclear/uranium, quantum, infrastructure/grid/power, biotech/healthcare, energy, materials, and other exposed industries.
+
+For each government item, distinguish:
+- **direct beneficiary / target** from **supplier / subcontractor** from **sector-sympathy exposure**;
+- announced policy from implemented policy;
+- authorization/appropriation from an actual award or cash flow;
+- headline size from economically material value to the public company.
+
+Congressional-trading context:
+- check recent House and Senate financial disclosures for serious finalists when practical;
+- prefer official House Clerk and Senate disclosure records as primary evidence;
+- distinguish Member versus spouse/dependent ownership, purchase versus sale, stock versus option/other security, transaction date versus disclosure date, and disclosed dollar range;
+- look for repeated/clustered activity and whether it aligns with or contradicts the fundamental thesis;
+- never imply insider knowledge, causation, or real-time signaling from a congressional trade;
+- never use a congressional transaction as the sole reason for a same-day options trade.
+
+A company with no meaningful government or congressional signal should simply be marked **none / not material** rather than forcing a narrative.
+
+### Optional Hugging Face financial catalyst triage
+
+Use a lightweight financial-text classifier only as a **discovery accelerator** when the news/filing volume is large. Appropriate examples include financial-news sentiment classifiers such as `mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis` or `ProsusAI/finbert`.
+
+Use it to:
+- deduplicate or cluster related headlines/events;
+- classify positive / negative / mixed directional language;
+- flag potentially material company-specific items for deeper review;
+- help prioritize which tickers deserve primary-source validation.
+
+Do **not** use model sentiment as a trade trigger, probability estimate, or substitute for primary evidence. A model may score a sector-sympathy headline as positive even when the named company is not the direct economic beneficiary.
 
 ### 4. OptionLab — options payoff and probability engine
 Repository: `rgaveiga/optionlab`
@@ -180,11 +219,6 @@ If a strategy only works at one narrow parameter setting, treat it as fragile ra
 
 ## Excluded / low-priority tools
 
-### FinBERT
-Repository: `ProsusAI/finBERT`
-
-Do not make this a default dependency. Modern LLM-based document analysis can classify richer changes such as guidance shifts, uncertainty, capital-allocation changes, regulatory risk, and management confidence. FinBERT may be used as a secondary sentiment comparison, not a deciding signal.
-
 ### Random Robinhood trading bots
 Do not use unofficial auto-trading repos as an execution layer. They add credential, reliability, API-change, and order-risk without improving the research edge. Research and recommendation remain separate from brokerage execution.
 
@@ -208,7 +242,7 @@ Required:
 2. Pull current price and recent market context.
 3. Check latest earnings / guidance / valuation-relevant facts.
 4. Use EdgarTools for SEC-filer thesis verification.
-5. Run USAspending if government exposure is material.
+5. Run the government/congressional sweep; use USAspending or agency/official sources when government exposure is material, and check recent congressional disclosures as supporting context.
 6. Compare expected upside, downside, catalyst timing, and opportunity cost against existing holdings.
 7. State what would invalidate the thesis and, when useful, a valuation/price ceiling or review trigger.
 
@@ -217,7 +251,7 @@ Required:
 1. Identify why the idea exists now.
 2. Verify fundamentals and balance-sheet runway.
 3. Identify concrete catalysts and dates.
-4. Check government spending when relevant.
+4. Run the government/congressional sweep, including policy/agency news and recent congressional disclosures when available; escalate to USAspending when actual federal dollars matter.
 5. Compare against current portfolio overlap.
 6. Prefer a short ranked candidate list over adding many tiny positions.
 
@@ -227,12 +261,13 @@ A good story without a differentiated catalyst, financial support, or favorable 
 Required sequence:
 1. **Underlying thesis** — no option before the stock/event thesis.
 2. **Event map** — earnings, economic releases, product/regulatory decisions, known catalysts.
-3. **Live chain** — current expirations, strikes, bid/ask, IV, liquidity, open interest/volume when available.
-4. **Structure selection** — prefer defined-risk structures consistent with the current Opportunity Playbook.
-5. **OptionLab pre-flight** — payoff, max loss, breakeven, Greeks, probability/expected outcome where model assumptions are reasonable.
-6. **Portfolio fit** — total open-options risk and correlation with existing positions.
-7. **Execution status** — executable only if all live terms are verified; otherwise conditional.
-8. **Exit plan** — profit target, loss/invalidating condition, event/expiration handling.
+3. **Government/congressional sweep** — check policy/agency developments, government-dollar exposure, and recent congressional disclosures for the finalists before chain selection.
+4. **Live chain** — current expirations, strikes, bid/ask, IV, liquidity, open interest/volume when available.
+5. **Structure selection** — prefer defined-risk structures consistent with the current Opportunity Playbook.
+6. **OptionLab pre-flight** — payoff, max loss, breakeven, Greeks, probability/expected outcome where model assumptions are reasonable.
+7. **Portfolio fit** — total open-options risk and correlation with existing positions.
+8. **Execution status** — executable only if all live terms are verified; otherwise conditional.
+9. **Exit plan** — profit target, loss/invalidating condition, event/expiration handling.
 
 Cheap premium is not an edge. A low debit may simply encode a low probability of success.
 
@@ -268,7 +303,7 @@ Required:
 
 For a serious investment decision, use this order:
 
-`Portfolio state -> Market context -> Primary filings -> Catalyst evidence -> Government-dollar check if relevant -> Portfolio fit -> Options chain if relevant -> OptionLab math if relevant -> Decision -> Journal -> QuantStats learning -> vectorbt proof for repeatable rules`
+`Portfolio state -> Market context -> Primary filings -> Catalyst evidence -> Government + congressional sweep -> Optional HF catalyst triage when volume is high -> Portfolio fit -> Options chain if relevant -> OptionLab math if relevant -> Decision -> Journal -> QuantStats learning -> vectorbt proof for repeatable rules`
 
 This order matters. Do not start with options math or a backtest before establishing the economic thesis.
 
